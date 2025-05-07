@@ -12,6 +12,7 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+
 async def ask_openrouter(prompt):
     try:
         import aiohttp
@@ -34,10 +35,9 @@ async def ask_openrouter(prompt):
     except Exception as e:
         logging.error(f"Ошибка при запросе к OpenRouter: {e}")
         return "Произошла ошибка при обработке вашего запроса."
+
 async def resume(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Пришли мне информацию: имя, опыт, навыки. Я составлю резюме!")
-    if not update.message.text.strip():
-        await update.message.reply_text("Пожалуйста, предоставь информацию для создания резюме.")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Привет! Я — умный Telegram-бот. Напиши мне что-нибудь или воспользуйся командами: /resume, /donate")
@@ -50,30 +50,10 @@ async def donate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text("Поддержи проект здесь:", reply_markup=reply_markup)
 
-async def (update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Пришли мне информацию: имя, опыт, навыки. Я составлю резюме!")
-
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_input = update.message.text
     response = await ask_openrouter(user_input)
     await update.message.reply_text(response)
-
-async def ask_openrouter(prompt):
-    import aiohttp
-    headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-        "HTTP-Referer": "https://t.me/",
-        "X-Title": "TelegramBot"
-    }
-    payload = {
-        "model": "openai/gpt-3.5-turbo",
-        "messages": [{"role": "user", "content": prompt}],
-        "stream": False
-    }
-    async with aiohttp.ClientSession() as session:
-        async with session.post("https://openrouter.ai/api/v1/chat/completions", json=payload, headers=headers) as resp:
-            data = await resp.json()
-            return data["choices"][0]["message"]["content"]
 
 def main():
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
