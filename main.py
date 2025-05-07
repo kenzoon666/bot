@@ -2,6 +2,7 @@ import os
 import logging
 import asyncio
 from telegram import Update
+import aiohttp  # для HTTP-запросов к OpenRouter или OpenAI
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -41,6 +42,7 @@ class BotManager:
 
             # Регистрация обработчиков
             self.app.add_handler(CommandHandler("start", self.start))
+            self.app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_text))
             # Добавьте другие обработчики...
 
             # Явная инициализация
@@ -59,6 +61,50 @@ class BotManager:
             logger.error(f"Ошибка инициализации: {e}")
             return False
 
+    async def handle_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    prompt = update.message.text
+    await update.message.chat.send_action("typing")
+    
+    try:
+        result = await self.generate_response(prompt)
+        await update.message.reply_text(result)
+    except Exception as e:
+        await update.message.reply_text("⚠️ Произошла ошибка при генерации ответа.")
+        logger.error(f"Ошибка генерации текста: {e}", exc_info=True)
+   if "картинк" in prompt.lower():
+    await update.message.reply_text("⏳ Генерирую изображение...")
+    url = await self.generate_image(prompt)
+    await update.message.reply_photo(url)
+    return
+async def generate_image(self, prompt: str) -> str:
+    api_key = os.getenv("OPENROUTER_API_KEY")
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "prompt": prompt,
+        "model": "openrouter/replicate/stability-ai/sdxl"
+    }
+    async with aiohttp.ClientSession() as session:
+        async with session.post("https://openrouter.ai/api/v1/images/generations", headers=headers, json=payload) as resp:
+            data = await resp.json()
+            return data["data"][0]["url"]
+ async def generate_response(self, prompt: str) -> str:
+    api_key = os.getenv("OPENROUTER_API_KEY")  # или OPENAI_API_KEY
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": "openrouter/openai/gpt-3.5-turbo",
+        "messages": [{"role": "user", "content": prompt}]
+    }
+    
+    async with aiohttp.ClientSession() as session:
+        async with session.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload) as resp:
+            data = await resp.json()
+            return data["choices"][0]["message"]["content"].strip()
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("🚀 Бот работает корректно!")
 
