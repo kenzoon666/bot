@@ -77,4 +77,114 @@ class BotManager:
                 result = await self.generate_response(prompt)
                 await update.message.reply_text(result)
         except Exception as e:
-            await update.message.reply_text("⚠_
+            await update.message.reply_text("⚠️ Произошла ошибка при генерации.")
+            logger.error(f"Ошибка генерации: {e}", exc_info=True)
+
+    async def generate_image(self, prompt: str) -> str:
+        api_key = os.getenv("OPENROUTER_API_KEY")
+        if not api_key:
+            logger.error("API-ключ OpenRouter не найден!")
+            return None
+
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+
+        payload = {
+            "prompt": prompt,
+            "model": "stability-ai/sdxl",  # Модель, которую вы используете
+            "width": 512,  # Пример размера изображения
+            "height": 512
+        }
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                # Изменённый URL для генерации изображений
+                url = "https://openrouter.ai/api/v1/images/generate"  # Проверьте актуальность URL
+                async with session.post(url, headers=headers, json=payload) as resp:
+                    if resp.status != 200:
+                        logger.error(f"Ошибка при запросе изображения: {resp.status} - {await resp.text()}")
+                        return None
+
+                    data = await resp.json()
+                    if "data" in data and data["data"]:
+                        image_url = data["data"][0]["url"]
+                        logger.info(f"Сгенерированный URL изображения: {image_url}")
+                        return image_url
+                    else:
+                        logger.error(f"Ошибка генерации изображения: {data}")
+                        return None
+        except Exception as e:
+            logger.error(f"Ошибка при запросе изображения: {e}")
+            return None
+
+    async def generate_response(self, prompt: str) -> str:
+        api_key = os.getenv("OPENROUTER_API_KEY")
+        if not api_key:
+            logger.error("API-ключ OpenRouter не найден!")
+            return "⚠️ Ошибка: не найден API-ключ."
+        
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+
+        payload = {
+            "model": "openai/gpt-3.5-turbo",  # Модель для генерации текста
+            "messages": [{"role": "user", "content": prompt}]
+        }
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload) as resp:
+                    if resp.status != 200:
+                        logger.error(f"Ошибка при запросе текста: {resp.status} - {await resp.text()}")
+                        return "⚠️ Ошибка при генерации ответа."
+                    
+                    data = await resp.json()
+                    if "choices" in data:
+                        return data["choices"][0]["message"]["content"].strip()
+                    else:
+                        logger.error(f"Ошибка OpenRouter: {data}")
+                        return "⚠️ Ошибка: не удалось получить ответ от AI."
+        except Exception as e:
+            logger.error(f"Ошибка при запросе текста: {e}")
+            return "⚠️ Ошибка при обработке ответа API."
+
+# --- FastAPI-приложение ---
+web_app = FastAPI()
+bot_manager = BotManager()
+
+@web_app.on_event("startup")
+async def startup_event():
+    initialized = await bot_manager.initialize()
+    if not initialized:
+        logger.error("Не удалось инициализировать бота при запуске.")
+        raise Exception("Ошибка инициализации бота.")
+
+@web_app.post("/webhook")
+async def handle_webhook(request: Request):
+    if not bot_manager.initialized:
+        logger.error("Бот не инициализирован!")
+        return {"status": "error", "message": "Bot not initialized"}, 503
+
+    try:
+        data = await request.json()
+        update = Update.de_json(data, bot_manager.app.bot)
+        await bot_manager.app.process_update(update)
+        return {"status": "ok"}
+    except Exception as e:
+        logger.error(f"Ошибка обработки: {e}")
+        return {"status": "error", "message": "Internal Server Error"}, 500
+
+@web_app.get("/")
+async def health_check():
+    return {
+        "status": "running",
+        "bot_initialized": bot_manager.initialized
+    }
+
+if __name__ == "__main__":
+    port = int(os.getenv("PORT", 10000))
+    uvicorn.run(web_app, host="0.0.0.0", port=port)
