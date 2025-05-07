@@ -106,6 +106,7 @@ class BotManager:
             async with session.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload) as resp:
                 data = await resp.json()
         if "choices" in data:
+            print("RAW RESPONSE:", data)
             return data["choices"][0]["message"]["content"].strip()
         else:
             logger.error(f"Ошибка OpenRouter: {data}")
