@@ -7,109 +7,98 @@ from telegram.ext import (
     CommandHandler,
     MessageHandler,
     filters,
-    ContextTypes,
-    Defaults
+    ContextTypes
 )
 from fastapi import FastAPI, Request, status
 import uvicorn
 
-# --- Конфигурация логов ---
+# --- Конфигурация ---
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
-# --- Инициализация приложений ---
-web_app = FastAPI()
-bot_app = Application.builder() \
-    .token(os.getenv("TELEGRAM_TOKEN")) \
-    .defaults(Defaults(block=False)) \
-    .updater(None) \
-    .build()
+# --- Глобальные флаги ---
+bot_initialized = False
+bot_app = None
 
-# --- Обработчики команд ---
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("✅ Бот успешно инициализирован!")
-
-# Все обработчики должны быть добавлены ДО инициализации
-handlers = [
-    CommandHandler("start", start),
-    # ... другие обработчики ...
-]
-
-# --- Критически важная инициализация ---
+# --- Инициализация бота ---
 async def initialize_bot():
-    """Полная инициализация бота перед запуском"""
+    global bot_app, bot_initialized
+    
     try:
-        # 1. Добавляем обработчики
-        for handler in handlers:
-            bot_app.add_handler(handler)
-        
-        # 2. Явная инициализация
-        await bot_app.initialize()
-        await bot_app.start()
-        
-        # 3. Установка вебхука
+        bot_app = Application.builder() \
+            .token(os.getenv("TELEGRAM_TOKEN")) \
+            .updater(None) \
+            .build()
+
+        # Добавляем обработчики
+        bot_app.add_handler(CommandHandler("start", start))
+        # ... другие обработчики ...
+
+        # Установка вебхука
         webhook_url = f"https://{os.getenv('RENDER_SERVICE_NAME')}.onrender.com/webhook"
         await bot_app.bot.set_webhook(
             url=webhook_url,
-            drop_pending_updates=True,
-            allowed_updates=Update.ALL_TYPES
+            drop_pending_updates=True
         )
-        logger.info(f"🔄 Вебхук установлен: {webhook_url}")
-        
-        # 4. Проверка соединения
-        me = await bot_app.bot.get_me()
-        logger.info(f"🤖 Бот @{me.username} готов к работе")
-        
+        logger.info(f"Вебхук установлен: {webhook_url}")
+
+        bot_initialized = True
         return True
+        
     except Exception as e:
-        logger.critical(f"🚨 Ошибка инициализации: {e}")
+        logger.error(f"Ошибка инициализации бота: {e}")
         return False
 
+# --- Обработчики команд ---
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("✅ Бот работает!")
+
 # --- Вебхук-эндпоинт ---
-@web_app.post("/webhook")
-async def telegram_webhook(request: Request):
-    if not bot_app.initialized:
-        logger.warning("⚠️ Приложение еще не инициализировано!")
-        return {"status": "error", "detail": "Bot not initialized"}, 503
+async def handle_webhook(request: Request):
+    global bot_app
     
+    if not bot_app:
+        logger.error("Бот не инициализирован!")
+        return {"status": "error"}, 503
+        
     try:
         data = await request.json()
         update = Update.de_json(data, bot_app.bot)
         await bot_app.process_update(update)
         return {"status": "ok"}
     except Exception as e:
-        logger.error(f"❌ Ошибка обработки update: {e}")
+        logger.error(f"Ошибка обработки сообщения: {e}")
         return {"status": "error"}, 500
 
-# --- Health Check ---
+# --- FastAPI приложение ---
+web_app = FastAPI()
+web_app.post("/webhook")(handle_webhook)
+
 @web_app.get("/")
 async def health_check():
     return {
         "status": "running",
-        "bot_initialized": bot_app.initialized,
-        "bot_running": bot_app.running
+        "bot_initialized": bot_initialized
     }
 
-# --- Запуск приложения ---
+# --- Запуск ---
 async def main():
-    # 1. Инициализация бота
     if not await initialize_bot():
-        logger.error("❌ Не удалось инициализировать бота, завершаем работу")
+        logger.error("Не удалось инициализировать бота")
         return
 
-    # 2. Запуск сервера
     port = int(os.getenv("PORT", 10000))
-    config = uvicorn.Config(
-        web_app,
-        host="0.0.0.0",
-        port=port,
-        log_level="info",
-        server_header=False
+    server = uvicorn.Server(
+        config=uvicorn.Config(
+            web_app,
+            host="0.0.0.0",
+            port=port,
+            log_level="info"
+        )
     )
-    server = uvicorn.Server(config)
     await server.serve()
 
 if __name__ == "__main__":
