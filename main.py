@@ -1,45 +1,64 @@
-# Основной файл бота
-import logging
 import os
+import logging
 import openai
-import telebot
+import telegram
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters, CallbackContext
 
-# === Настройки ===
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+from dotenv import load_dotenv
+load_dotenv()
+
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-MODEL = "openrouter/auto"  # или другой, например, openrouter/mistral-7b
 
-# === Проверка токенов ===
-if not TELEGRAM_BOT_TOKEN or not OPENROUTER_API_KEY:
-    raise Exception("Не найдены переменные окружения TELEGRAM_BOT_TOKEN или OPENROUTER_API_KEY")
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
-openai.api_key = OPENROUTER_API_KEY
-openai.api_base = "https://openrouter.ai/api/v1"
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Привет! Я — умный Telegram-бот. Напиши мне что-нибудь или воспользуйся командами: /resume, /donate")
 
-# === Логирование ===
-logging.basicConfig(level=logging.INFO)
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Доступные команды:\n/resume — сгенерировать резюме\n/donate — поддержать проект")
 
-# === Обработка команды /start ===
-@bot.message_handler(commands=['start'])
-def handle_start(message):
-    bot.send_message(message.chat.id, "Привет! Отправь мне сообщение, и я отвечу с помощью ИИ.")
+async def donate(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [[InlineKeyboardButton("Поддержать на Boosty", url="https://boosty.to/")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text("Поддержи проект здесь:", reply_markup=reply_markup)
 
-# === Обработка обычных сообщений ===
-@bot.message_handler(func=lambda message: True)
-def handle_message(message):
-    try:
-        response = openai.ChatCompletion.create(
-            model=MODEL,
-            messages=[{"role": "user", "content": message.text}]
-        )
-        reply = response.choices[0].message.content
-        bot.send_message(message.chat.id, reply)
-    except Exception as e:
-        logging.error(f"Ошибка при обращении к OpenRouter: {e}")
-        bot.send_message(message.chat.id, "Произошла ошибка при обращении к ИИ.")
+async def resume(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Пришли мне информацию: имя, опыт, навыки. Я составлю резюме!")
 
-# === Запуск бота ===
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_input = update.message.text
+    response = await ask_openrouter(user_input)
+    await update.message.reply_text(response)
+
+async def ask_openrouter(prompt):
+    import aiohttp
+    headers = {
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "HTTP-Referer": "https://t.me/",
+        "X-Title": "TelegramBot"
+    }
+    payload = {
+        "model": "openai/gpt-3.5-turbo",
+        "messages": [{"role": "user", "content": prompt}],
+        "stream": False
+    }
+    async with aiohttp.ClientSession() as session:
+        async with session.post("https://openrouter.ai/api/v1/chat/completions", json=payload, headers=headers) as resp:
+            data = await resp.json()
+            return data["choices"][0]["message"]["content"]
+
+def main():
+    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("resume", resume))
+    app.add_handler(CommandHandler("donate", donate))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
+    app.run_polling()
+
 if __name__ == "__main__":
-    logging.info("Бот запущен...")
-    bot.infinity_polling()
+    main()
