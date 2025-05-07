@@ -50,7 +50,7 @@ async def donate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text("Поддержи проект здесь:", reply_markup=reply_markup)
 
-async def resume(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def (update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Пришли мне информацию: имя, опыт, навыки. Я составлю резюме!")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
