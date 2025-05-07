@@ -3,7 +3,7 @@ import logging
 import openai
 import telegram
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters, CallbackContext
+from telegram.ext import Updater, CommandHandler, MessageHandler, filters, CallbackContext
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -36,35 +36,40 @@ async def ask_openrouter(prompt):
         logging.error(f"Ошибка при запросе к OpenRouter: {e}")
         return "Произошла ошибка при обработке вашего запроса."
 
-async def resume(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def resume(update: Update, context: CallbackContext):
     await update.message.reply_text("Пришли мне информацию: имя, опыт, навыки. Я составлю резюме!")
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def start(update: Update, context: CallbackContext):
     await update.message.reply_text("Привет! Я — умный Telegram-бот. Напиши мне что-нибудь или воспользуйся командами: /resume, /donate")
 
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def help_command(update: Update, context: CallbackContext):
     await update.message.reply_text("Доступные команды:\n/resume — сгенерировать резюме\n/donate — поддержать проект")
 
-async def donate(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def donate(update: Update, context: CallbackContext):
     keyboard = [[InlineKeyboardButton("Поддержать на Boosty", url="https://boosty.to/")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text("Поддержи проект здесь:", reply_markup=reply_markup)
 
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_message(update: Update, context: CallbackContext):
     user_input = update.message.text
     response = await ask_openrouter(user_input)
     await update.message.reply_text(response)
 
 def main():
-    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+    # Используем Updater для старой версии библиотеки
+    updater = Updater(TELEGRAM_TOKEN, use_context=True)
+    dispatcher = updater.dispatcher
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("help", help_command))
-    app.add_handler(CommandHandler("resume", resume))
-    app.add_handler(CommandHandler("donate", donate))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    # Добавляем обработчики команд и сообщений
+    dispatcher.add_handler(CommandHandler("start", start))
+    dispatcher.add_handler(CommandHandler("help", help_command))
+    dispatcher.add_handler(CommandHandler("resume", resume))
+    dispatcher.add_handler(CommandHandler("donate", donate))
+    dispatcher.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    app.run_polling()
+    # Запуск бота
+    updater.start_polling()
+    updater.idle()
 
 if __name__ == "__main__":
     main()
