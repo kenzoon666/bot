@@ -1,11 +1,12 @@
 import os
 from dotenv import load_dotenv
 
-# Загрузка переменных окружения из .env файла
 load_dotenv()
 
-# Теперь переменная будет работать
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+if not TELEGRAM_TOKEN:
+    print("Ошибка: Токен не найден.")
+
 from telegram import Update
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
 from dotenv import load_dotenv
