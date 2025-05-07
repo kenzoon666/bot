@@ -105,7 +105,12 @@ class BotManager:
         async with aiohttp.ClientSession() as session:
             async with session.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload) as resp:
                 data = await resp.json()
-                return data["choices"][0]["message"]["content"].strip()
+        if "choices" in data:
+            return data["choices"][0]["message"]["content"].strip()
+        else:
+            logger.error(f"Ошибка OpenRouter: {data}")
+            return "⚠️ Ошибка: не удалось получить ответ от AI."
+
 
 # --- FastAPI-приложение ---
 web_app = FastAPI()
