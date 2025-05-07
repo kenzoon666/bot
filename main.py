@@ -92,12 +92,19 @@ class BotManager:
         }
         async with aiohttp.ClientSession() as session:
             async with session.post("https://openrouter.ai/api/v1/images/generations", headers=headers, json=payload) as resp:
-                data = await resp.json()
-                if "data" in data:
-                    return data["data"][0]["url"]
-                else:
-                    logger.error(f"Ошибка генерации изображения: {data}")
+                if resp.status != 200:
+                    logger.error(f"Ошибка при запросе изображения: {resp.status} - {await resp.text()}")
                     return "⚠️ Ошибка при генерации изображения."
+                try:
+                    data = await resp.json()
+                    if "data" in data:
+                        return data["data"][0]["url"]
+                    else:
+                        logger.error(f"Ошибка генерации изображения: {data}")
+                        return "⚠️ Ошибка при генерации изображения."
+                except Exception as e:
+                    logger.error(f"Ошибка декодирования ответа от API: {e}")
+                    return "⚠️ Ошибка при обработке ответа API."
 
     async def generate_response(self, prompt: str) -> str:
         api_key = os.getenv("OPENROUTER_API_KEY")
@@ -112,24 +119,28 @@ class BotManager:
             "Content-Type": "application/json"
         }
 
-        # Замените на корректный идентификатор модели OpenRouter (например, GPT-3.5 Turbo)
+        # Используем правильный идентификатор модели OpenRouter
         payload = {
-            "model": "openai/gpt-3.5-turbo",  # или "openai/gpt-4", если нужна версия GPT-4
+            "model": "openai/gpt-3.5-turbo",  # Или "openai/gpt-4" в зависимости от модели
             "messages": [{"role": "user", "content": prompt}]
         }
 
-
         async with aiohttp.ClientSession() as session:
             async with session.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload) as resp:
-                data = await resp.json()
-
-        if "choices" in data:
-            logger.info(f"Ответ от OpenRouter: {data}")
-            return data["choices"][0]["message"]["content"].strip()
-        else:
-            logger.error(f"Ошибка OpenRouter: {data}")
-            return "⚠️ Ошибка: не удалось получить ответ от AI."
-
+                if resp.status != 200:
+                    logger.error(f"Ошибка при запросе текста: {resp.status} - {await resp.text()}")
+                    return "⚠️ Ошибка при генерации ответа."
+                try:
+                    data = await resp.json()
+                    if "choices" in data:
+                        logger.info(f"Ответ от OpenRouter: {data}")
+                        return data["choices"][0]["message"]["content"].strip()
+                    else:
+                        logger.error(f"Ошибка OpenRouter: {data}")
+                        return "⚠️ Ошибка: не удалось получить ответ от AI."
+                except Exception as e:
+                    logger.error(f"Ошибка декодирования ответа от API: {e}")
+                    return "⚠️ Ошибка при обработке ответа API."
 
 # --- FastAPI-приложение ---
 web_app = FastAPI()
