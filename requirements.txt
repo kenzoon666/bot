@@ -2,4 +2,5 @@ python-telegram-bot==20.8
 aiohttp
 openai
 python-dotenv
-
+fastapi>=0.68.0
+uvicorn>=0.15.0
