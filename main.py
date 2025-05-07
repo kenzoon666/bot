@@ -49,41 +49,55 @@ async def ask_openrouter(prompt):
             data = await resp.json()
             return data["choices"][0]["message"]["content"]
 
-def main():
-    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
-
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("help", help_command))
-    app.add_handler(CommandHandler("resume", resume))
-    app.add_handler(CommandHandler("donate", donate))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, status
 import uvicorn
 
-# Создаем FastAPI приложение
+# Инициализация
 web_app = FastAPI()
 bot_app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
-# Вебхук-эндпоинт для Telegram
+# Health check для Render
+@web_app.get("/", status_code=status.HTTP_200_OK)
+async def health_check():
+    return {"status": "ok", "bot": "running"}
+
+# Вебхук-эндпоинт
 @web_app.post("/webhook")
-async def webhook(request: Request):
-    data = await request.json()
-    update = Update.de_json(data, bot_app.bot)
-    await bot_app.process_update(update)
+async def telegram_webhook(request: Request):
+    try:
+        data = await request.json()
+        update = Update.de_json(data, bot_app.bot)
+        await bot_app.process_update(update)
+    except Exception as e:
+        print(f"Webhook error: {e}")
     return {"status": "ok"}
 
+async def setup_webhook():
+    webhook_url = f"https://{os.environ['RENDER_SERVICE_NAME']}.onrender.com/webhook"
+    await bot_app.bot.set_webhook(
+        url=webhook_url,
+        drop_pending_updates=True
+    )
+    print(f"Webhook configured: {webhook_url}")
+
 def main():
-    # Добавляем все обработчики как раньше
+    # Регистрация обработчиков
     bot_app.add_handler(CommandHandler("start", start))
     bot_app.add_handler(CommandHandler("help", help_command))
     bot_app.add_handler(CommandHandler("resume", resume))
     bot_app.add_handler(CommandHandler("donate", donate))
     bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    # Запускаем сервер
+    # Настройка и запуск
     port = int(os.environ.get("PORT", 8000))
-    uvicorn.run(web_app, host="0.0.0.0", port=port)
+    uvicorn.run(
+        web_app,
+        host="0.0.0.0",
+        port=port,
+        server_header=False
+    )
 
 if __name__ == "__main__":
+    import asyncio
+    asyncio.run(setup_webhook())
     main()
