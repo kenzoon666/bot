@@ -94,6 +94,11 @@ class BotManager:
 
     async def generate_response(self, prompt: str) -> str:
         api_key = os.getenv("OPENROUTER_API_KEY")
+        if not api_key:
+            logger.error("API-ключ OpenRouter не найден!")
+            return "⚠️ Ошибка: не найден API-ключ."
+        else:
+            logger.info("API-ключ OpenRouter загружен успешно.")
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json"
