@@ -12,6 +12,28 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+async def ask_openrouter(prompt):
+    try:
+        import aiohttp
+        headers = {
+            "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+            "HTTP-Referer": "https://t.me/",
+            "X-Title": "TelegramBot"
+        }
+        payload = {
+            "model": "openai/gpt-3.5-turbo",
+            "messages": [{"role": "user", "content": prompt}],
+            "stream": False
+        }
+        async with aiohttp.ClientSession() as session:
+            async with session.post("https://openrouter.ai/api/v1/chat/completions", json=payload, headers=headers) as resp:
+                data = await resp.json()
+                if resp.status != 200:
+                    return f"Ошибка: {data.get('error', {}).get('message', 'Неизвестная ошибка')}"
+                return data["choices"][0]["message"]["content"]
+    except Exception as e:
+        logging.error(f"Ошибка при запросе к OpenRouter: {e}")
+        return "Произошла ошибка при обработке вашего запроса."
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Привет! Я — умный Telegram-бот. Напиши мне что-нибудь или воспользуйся командами: /resume, /donate")
