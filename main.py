@@ -34,6 +34,10 @@ async def ask_openrouter(prompt):
     except Exception as e:
         logging.error(f"Ошибка при запросе к OpenRouter: {e}")
         return "Произошла ошибка при обработке вашего запроса."
+async def resume(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Пришли мне информацию: имя, опыт, навыки. Я составлю резюме!")
+    if not update.message.text.strip():
+        await update.message.reply_text("Пожалуйста, предоставь информацию для создания резюме.")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Привет! Я — умный Telegram-бот. Напиши мне что-нибудь или воспользуйся командами: /resume, /donate")
