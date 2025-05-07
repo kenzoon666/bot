@@ -1,1 +1,5 @@
+python-telegram-bot==20.8
+aiohttp
+openai
+python-dotenv
 
