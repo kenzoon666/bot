@@ -112,11 +112,12 @@ class BotManager:
             "Content-Type": "application/json"
         }
 
-        # Проверьте правильность модели
+        # Замените на корректный идентификатор модели OpenRouter (например, GPT-3.5 Turbo)
         payload = {
-            "model": "openrouter/openai/gpt-4",  # Замените на корректный идентификатор модели
+            "model": "openai/gpt-3.5-turbo",  # или "openai/gpt-4", если нужна версия GPT-4
             "messages": [{"role": "user", "content": prompt}]
         }
+
 
         async with aiohttp.ClientSession() as session:
             async with session.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload) as resp:
