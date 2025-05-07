@@ -156,13 +156,16 @@ bot_manager = BotManager()
 
 @web_app.on_event("startup")
 async def startup_event():
-    await bot_manager.initialize()
+    initialized = await bot_manager.initialize()
+    if not initialized:
+        logger.error("Не удалось инициализировать бота при запуске.")
+        raise Exception("Ошибка инициализации бота.")
 
 @web_app.post("/webhook")
 async def handle_webhook(request: Request):
     if not bot_manager.initialized:
         logger.error("Бот не инициализирован!")
-        return {"status": "error"}, 503
+        return {"status": "error", "message": "Bot not initialized"}, 503
 
     try:
         data = await request.json()
@@ -171,7 +174,7 @@ async def handle_webhook(request: Request):
         return {"status": "ok"}
     except Exception as e:
         logger.error(f"Ошибка обработки: {e}")
-        return {"status": "error"}, 500
+        return {"status": "error", "message": "Internal Server Error"}, 500
 
 @web_app.get("/")
 async def health_check():
