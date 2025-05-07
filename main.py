@@ -62,25 +62,25 @@ class BotManager:
             return False
 
     async def handle_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-    prompt = update.message.text
-    await update.message.chat.send_action("typing")
+            prompt = update.message.text
+            await update.message.chat.send_action("typing")
     
-    try:
-        result = await self.generate_response(prompt)
-        await update.message.reply_text(result)
-    except Exception as e:
-        await update.message.reply_text("⚠️ Произошла ошибка при генерации ответа.")
-        logger.error(f"Ошибка генерации текста: {e}", exc_info=True)
+        try:
+            result = await self.generate_response(prompt)
+            await update.message.reply_text(result)
+        except Exception as e:
+            await update.message.reply_text("⚠️ Произошла ошибка при генерации ответа.")
+            logger.error(f"Ошибка генерации текста: {e}", exc_info=True)
    if "картинк" in prompt.lower():
-    await update.message.reply_text("⏳ Генерирую изображение...")
-    url = await self.generate_image(prompt)
-    await update.message.reply_photo(url)
+            await update.message.reply_text("⏳ Генерирую изображение...")
+            url = await self.generate_image(prompt)
+            await update.message.reply_photo(url)
     return
-async def generate_image(self, prompt: str) -> str:
-    api_key = os.getenv("OPENROUTER_API_KEY")
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json"
+    async def generate_image(self, prompt: str) -> str:
+        api_key = os.getenv("OPENROUTER_API_KEY")
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
     }
     payload = {
         "prompt": prompt,
