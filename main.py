@@ -26,7 +26,14 @@ handlers = [
 ]
 
 # --- Вебхук-эндпоинт ---
-@web_app.post("/webhook")
+@web_app.on_event("startup")
+async def on_startup():
+    try:
+        await bot_app.bot.get_me()
+        logging.info("Бот успешно подключен к Telegram")
+    except Exception as e:
+        logging.critical(f"Ошибка подключения: {e}")
+        @web_app.post("/webhook")
 async def handle_webhook(request: Request):
     try:
         # Важно: инициализация при первом запросе
