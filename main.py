@@ -79,6 +79,9 @@ class BotManager:
 
     async def generate_image(self, prompt: str) -> str:
         api_key = os.getenv("OPENROUTER_API_KEY")
+        if not api_key:
+            logger.error("API-ключ OpenRouter не найден!")
+            return "⚠️ Ошибка: не найден API-ключ."
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json"
@@ -90,7 +93,11 @@ class BotManager:
         async with aiohttp.ClientSession() as session:
             async with session.post("https://openrouter.ai/api/v1/images/generations", headers=headers, json=payload) as resp:
                 data = await resp.json()
-                return data["data"][0]["url"]
+                if "data" in data:
+                    return data["data"][0]["url"]
+                else:
+                    logger.error(f"Ошибка генерации изображения: {data}")
+                    return "⚠️ Ошибка при генерации изображения."
 
     async def generate_response(self, prompt: str) -> str:
         api_key = os.getenv("OPENROUTER_API_KEY")
@@ -99,19 +106,24 @@ class BotManager:
             return "⚠️ Ошибка: не найден API-ключ."
         else:
             logger.info("API-ключ OpenRouter загружен успешно.")
+        
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json"
         }
+
+        # Проверьте правильность модели
         payload = {
-            "model": "openrouter/openai/gpt-3.5-turbo",
+            "model": "openrouter/openai/gpt-4",  # Замените на корректный идентификатор модели
             "messages": [{"role": "user", "content": prompt}]
         }
+
         async with aiohttp.ClientSession() as session:
             async with session.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload) as resp:
                 data = await resp.json()
+
         if "choices" in data:
-            print("RAW RESPONSE:", data)
+            logger.info(f"Ответ от OpenRouter: {data}")
             return data["choices"][0]["message"]["content"].strip()
         else:
             logger.error(f"Ошибка OpenRouter: {data}")
