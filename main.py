@@ -1,5 +1,9 @@
 from telegram import Update
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
+from dotenv import load_dotenv
+load_dotenv()  # Загружаем переменные окружения
+
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 
 # Функция для команды start
 def start(update: Update, context: CallbackContext):
