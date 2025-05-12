@@ -1,33 +1,77 @@
 import os
 import logging
 import aiohttp
+from typing import Optional, Dict
 from telegram import (
     Update,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     KeyboardButton,
-    ReplyKeyboardMarkup
+    ReplyKeyboardMarkup,
+    ReplyKeyboardRemove
 )
-from telegram.constants import ChatAction
+from telegram.constants import ChatAction, ParseMode
 from telegram.ext import (
     Application,
     CommandHandler,
     MessageHandler,
     filters,
     ContextTypes,
-    CallbackQueryHandler
+    CallbackQueryHandler,
+    TypeHandler
 )
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException, status
 from fastapi.responses import JSONResponse
 import uvicorn
+from dataclasses import dataclass
+from functools import wraps
 
 # --- Конфигурация логов ---
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler("bot.log"),
+        logging.StreamHandler()
+    ]
 )
 logger = logging.getLogger(__name__)
 
+# --- Конфигурация ---
+@dataclass
+class Config:
+    TELEGRAM_TOKEN: str
+    OPENROUTER_API_KEY: str
+    WEBHOOK_URL: Optional[str] = None
+    WEBHOOK_SECRET: Optional[str] = None
+    PORT: int = 8000
+    DEBUG: bool = False
+
+    @classmethod
+    def from_env(cls):
+        return cls(
+            TELEGRAM_TOKEN=os.getenv("TELEGRAM_TOKEN"),
+            OPENROUTER_API_KEY=os.getenv("OPENROUTER_API_KEY"),
+            WEBHOOK_URL=os.getenv("WEBHOOK_URL"),
+            WEBHOOK_SECRET=os.getenv("WEBHOOK_SECRET"),
+            PORT=int(os.getenv("PORT", 8000)),
+            DEBUG=os.getenv("DEBUG", "false").lower() == "true"
+        )
+
+# --- Декораторы ---
+def error_handler(func):
+    @wraps(func)
+    async def wrapper(*args, **kwargs):
+        try:
+            return await func(*args, **kwargs)
+        except Exception as e:
+            logger.error(f"Error in {func.__name__}: {str(e)}", exc_info=True)
+            if len(args) > 0 and isinstance(args[0], Update):
+                update = args[0]
+                await update.message.reply_text("⚠️ Произошла ошибка. Пожалуйста, попробуйте позже.")
+    return wrapper
+
+# --- Основной класс бота ---
 class BotManager:
     _instance = None
 
@@ -36,63 +80,88 @@ class BotManager:
             cls._instance = super().__new__(cls)
             cls._instance.initialized = False
             cls._instance.app = None
-            cls._instance.user_states = {}  # Для хранения состояний пользователей
+            cls._instance.user_states = {}
+            cls._instance.config = Config.from_env()
         return cls._instance
 
     async def initialize(self):
         if self.initialized:
             return True
 
-        required_env = ["TELEGRAM_TOKEN", "OPENROUTER_API_KEY"]
-        missing = [key for key in required_env if not os.getenv(key)]
-        if missing:
-            logger.error(f"❌ Отсутствуют переменные окружения: {', '.join(missing)}")
+        if not all([self.config.TELEGRAM_TOKEN, self.config.OPENROUTER_API_KEY]):
+            logger.error("❌ Missing required environment variables")
             return False
 
         try:
-            self.app = Application.builder().token(os.getenv("TELEGRAM_TOKEN")).updater(None).build()
+            self.app = (
+                Application.builder()
+                .token(self.config.TELEGRAM_TOKEN)
+                .updater(None)
+                .build()
+            )
 
             # Регистрация обработчиков
-            handlers = [
-                CommandHandler("start", self.start),
-                CommandHandler("help", self.help),
-                CommandHandler("menu", self.show_menu),
-                CommandHandler("cancel", self.cancel),
-                CallbackQueryHandler(self.handle_callback),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_text),
-                MessageHandler(filters.VOICE, self.handle_voice)
-            ]
-            
-            for handler in handlers:
-                self.app.add_handler(handler)
+            self._register_handlers()
 
             await self.app.initialize()
             await self.app.start()
 
-            # Настройка вебхука
-            webhook_url = os.getenv("WEBHOOK_URL")
-            if webhook_url:
-                secret_token = os.getenv("WEBHOOK_SECRET")
-                await self.app.bot.set_webhook(
-                    webhook_url,
-                    secret_token=secret_token,
-                    drop_pending_updates=True
-                )
-                logger.info(f"✅ Вебхук установлен на {webhook_url}")
+            if self.config.WEBHOOK_URL:
+                await self._setup_webhook()
 
             self.initialized = True
-            logger.info("✅ Бот успешно инициализирован")
+            logger.info("✅ Bot initialized successfully")
             return True
 
         except Exception as e:
-            logger.exception("❌ Ошибка инициализации бота")
+            logger.exception("❌ Bot initialization failed")
             return False
 
+    def _register_handlers(self):
+        handlers = [
+            CommandHandler("start", self.start),
+            CommandHandler("help", self.help),
+            CommandHandler("menu", self.show_menu),
+            CommandHandler("cancel", self.cancel),
+            CallbackQueryHandler(self.handle_callback),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_text),
+            MessageHandler(filters.VOICE, self.handle_voice),
+            TypeHandler(Update, self._check_rate_limit)
+        ]
+        
+        for handler in handlers:
+            self.app.add_handler(handler)
+
+    async def _setup_webhook(self):
+        try:
+            await self.app.bot.set_webhook(
+                self.config.WEBHOOK_URL,
+                secret_token=self.config.WEBHOOK_SECRET,
+                drop_pending_updates=True,
+                allowed_updates=["message", "callback_query"]
+            )
+            logger.info(f"✅ Webhook set to {self.config.WEBHOOK_URL}")
+        except Exception as e:
+            logger.error(f"❌ Failed to set webhook: {e}")
+
+    async def _check_rate_limit(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Проверка ограничения запросов"""
+        user_id = update.effective_user.id
+        if user_id in context.bot_data.get("rate_limit", {}):
+            await update.message.reply_text("⚠️ Слишком много запросов. Подождите 1 минуту.")
+            return
+        context.bot_data.setdefault("rate_limit", {})[user_id] = True
+        context.job_queue.run_once(
+            lambda _: context.bot_data["rate_limit"].pop(user_id, None),
+            when=60
+        )
+
+    @error_handler
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработка команды /start"""
         if not update.message:
             return
 
-        # Основная клавиатура
         reply_keyboard = [
             ["🖼️ Сгенерировать изображение", "🎨 Генерация аватара"],
             ["🎧 Текст в голос", "🎙️ Распознать голос"],
@@ -109,7 +178,9 @@ class BotManager:
             reply_markup=markup
         )
 
+    @error_handler
     async def help(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработка команды /help"""
         help_text = (
             "📌 <b>Доступные команды:</b>\n"
             "/start - Главное меню\n"
@@ -120,19 +191,22 @@ class BotManager:
             "🎙️ <b>Голосовые сообщения:</b>\n"
             "Отправьте голосовое сообщение для распознавания"
         )
-        await update.message.reply_text(help_text, parse_mode="HTML")
+        await update.message.reply_text(help_text, parse_mode=ParseMode.HTML)
 
+    @error_handler
     async def cancel(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработка команды /cancel"""
         user_id = update.effective_user.id
-        if user_id in self.user_states:
-            del self.user_states[user_id]
+        self.user_states.pop(user_id, None)
         await update.message.reply_text(
             "Текущее действие отменено",
             reply_markup=ReplyKeyboardRemove()
         )
         await self.start(update, context)
 
+    @error_handler
     async def show_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Показ инлайн меню"""
         keyboard = [
             [InlineKeyboardButton("🖼️ Сгенерировать изображение", callback_data='generate_image')],
             [InlineKeyboardButton("🎨 Генерация аватара", callback_data='generate_avatar')],
@@ -142,7 +216,9 @@ class BotManager:
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.message.reply_text("Выберите действие:", reply_markup=reply_markup)
 
+    @error_handler
     async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработка инлайн кнопок"""
         query = update.callback_query
         await query.answer()
         
@@ -160,12 +236,14 @@ class BotManager:
         elif data == 'voice_to_text':
             await query.edit_message_text("🎙️ Отправьте голосовое сообщение для распознавания:")
 
+    @error_handler
     async def handle_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработка текстовых сообщений"""
         if not update.message:
             return
 
         user_id = update.effective_user.id
-        text = update.message.text
+        text = update.message.text.strip()
         state = self.user_states.get(user_id)
 
         # Обработка команд с клавиатуры
@@ -187,41 +265,57 @@ class BotManager:
             await update.message.reply_text("🎨 Введите описание для аватара:")
             return
 
+        # Валидация ввода
+        if not text:
+            await update.message.reply_text("❌ Сообщение не может быть пустым")
+            return
+
         # Обработка состояний
         if state == 'waiting_for_image_prompt' or state == 'waiting_for_avatar_prompt':
-            await update.message.chat.send_action(ChatAction.UPLOAD_PHOTO)
-            try:
-                await update.message.reply_text("⏳ Генерирую изображение...")
-                
-                # Определяем модель в зависимости от типа генерации
-                model = "stability-ai/sdxl" if state == 'waiting_for_image_prompt' else "stability-ai/stable-diffusion-xl"
-                
-                image_url = await self.generate_image(text, model)
-                if image_url:
-                    await update.message.reply_photo(image_url)
-                else:
-                    await update.message.reply_text("⚠️ Не удалось сгенерировать изображение")
-                
-                del self.user_states[user_id]
-            except Exception as e:
-                logger.error(f"Ошибка генерации изображения: {e}")
-                await update.message.reply_text("⚠️ Произошла ошибка при генерации")
+            await self._handle_image_generation(update, text, state)
         else:
-            # Обработка обычного текста
-            response = await self.generate_response(text)
-            await update.message.reply_text(response, parse_mode="Markdown")
+            await self._handle_regular_text(update, text)
 
+    async def _handle_image_generation(self, update: Update, text: str, state: str):
+        """Обработка генерации изображений"""
+        user_id = update.effective_user.id
+        await update.message.chat.send_action(ChatAction.UPLOAD_PHOTO)
+        
+        try:
+            await update.message.reply_text("⏳ Генерирую изображение...")
+            
+            model = "stability-ai/sdxl" if state == 'waiting_for_image_prompt' else "stability-ai/stable-diffusion-xl"
+            image_url = await self.generate_image(text, model)
+            
+            if image_url:
+                await update.message.reply_photo(image_url)
+            else:
+                await update.message.reply_text("⚠️ Не удалось сгенерировать изображение. Проверьте описание.")
+            
+            self.user_states.pop(user_id, None)
+        except Exception as e:
+            logger.error(f"Image generation error: {e}")
+            await update.message.reply_text("⚠️ Произошла ошибка при генерации")
+            self.user_states.pop(user_id, None)
+
+    async def _handle_regular_text(self, update: Update, text: str):
+        """Обработка обычного текста"""
+        response = await self.generate_response(text)
+        await update.message.reply_text(response, parse_mode=ParseMode.MARKDOWN)
+
+    @error_handler
     async def handle_voice(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработка голосовых сообщений"""
+        # Реальная реализация должна использовать Speech-to-Text API
         await update.message.reply_text("🎙️ Голосовые сообщения пока не поддерживаются")
 
-    async def generate_image(self, prompt: str, model: str = "stability-ai/sdxl") -> str | None:
-        api_key = os.getenv("OPENROUTER_API_KEY")
-        if not api_key:
-            logger.error("❌ API-ключ OpenRouter не найден!")
+    async def generate_image(self, prompt: str, model: str) -> Optional[str]:
+        """Генерация изображения через OpenRouter API"""
+        if not prompt.strip():
             return None
 
         headers = {
-            "Authorization": f"Bearer {api_key}",
+            "Authorization": f"Bearer {self.config.OPENROUTER_API_KEY}",
             "Content-Type": "application/json"
         }
 
@@ -243,22 +337,22 @@ class BotManager:
                 ) as resp:
                     if resp.status != 200:
                         error = await resp.text()
-                        logger.error(f"❌ Ошибка генерации: {resp.status} - {error}")
+                        logger.error(f"Image generation failed: {resp.status} - {error}")
                         return None
 
                     data = await resp.json()
                     return data.get("data", [{}])[0].get("url")
         except Exception as e:
-            logger.exception("❌ Ошибка запроса генерации изображения")
+            logger.exception("Image generation request failed")
             return None
 
     async def generate_response(self, prompt: str) -> str:
-        api_key = os.getenv("OPENROUTER_API_KEY")
-        if not api_key:
-            return "⚠️ Ошибка: отсутствует API-ключ."
+        """Генерация текстового ответа через OpenRouter API"""
+        if not prompt.strip():
+            return "❌ Запрос не может быть пустым"
 
         headers = {
-            "Authorization": f"Bearer {api_key}",
+            "Authorization": f"Bearer {self.config.OPENROUTER_API_KEY}",
             "Content-Type": "application/json"
         }
 
@@ -277,13 +371,13 @@ class BotManager:
                 ) as resp:
                     if resp.status != 200:
                         error = await resp.text()
-                        logger.error(f"❌ Ошибка запроса: {resp.status} - {error}")
+                        logger.error(f"Chat request failed: {resp.status} - {error}")
                         return "⚠️ Ошибка при обработке запроса"
 
                     data = await resp.json()
                     return data.get("choices", [{}])[0].get("message", {}).get("content", "⚠️ Нет ответа")
         except Exception as e:
-            logger.exception("❌ Ошибка запроса к API")
+            logger.exception("Chat request failed")
             return "⚠️ Ошибка при обработке запроса"
 
 # --- FastAPI приложение ---
@@ -293,15 +387,15 @@ bot_manager = BotManager()
 @web_app.on_event("startup")
 async def startup_event():
     if not await bot_manager.initialize():
-        raise RuntimeError("❌ Бот не инициализирован")
+        raise RuntimeError("Bot initialization failed")
 
 @web_app.post("/webhook")
 async def handle_webhook(request: Request):
     # Проверка секретного токена
-    if request.headers.get('X-Telegram-Bot-Api-Secret-Token') != os.getenv("WEBHOOK_SECRET"):
-        return JSONResponse(
-            status_code=403,
-            content={"status": "error", "message": "Forbidden"}
+    if request.headers.get('X-Telegram-Bot-Api-Secret-Token') != bot_manager.config.WEBHOOK_SECRET:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden"
         )
 
     try:
@@ -310,16 +404,20 @@ async def handle_webhook(request: Request):
         await bot_manager.app.process_update(update)
         return {"status": "ok"}
     except Exception as e:
-        logger.exception("❌ Ошибка в webhook")
-        return JSONResponse(
-            status_code=400,
-            content={"status": "error", "message": str(e)}
+        logger.exception("Webhook error")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
         )
+
+@web_app.get("/health")
+async def health_check():
+    return {"status": "ok"}
 
 if __name__ == "__main__":
     uvicorn.run(
         web_app,
         host="0.0.0.0",
-        port=int(os.getenv("PORT", 8000)),
-        reload=os.getenv("DEBUG", "false").lower() == "true"
+        port=bot_manager.config.PORT,
+        reload=bot_manager.config.DEBUG
     )
