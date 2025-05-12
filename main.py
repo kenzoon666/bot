@@ -3,6 +3,7 @@ import logging
 import asyncio
 import aiohttp
 from telegram import Update
+from telegram.constants import ChatAction
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -39,14 +40,11 @@ class BotManager:
         required_env = ["TELEGRAM_TOKEN", "OPENROUTER_API_KEY", "RENDER_SERVICE_NAME"]
         missing = [key for key in required_env if not os.getenv(key)]
         if missing:
-            logger.error(f"Отсутствуют переменные окружения: {', '.join(missing)}")
+            logger.error(f"❌ Отсутствуют переменные окружения: {', '.join(missing)}")
             return False
 
         try:
-            self.app = Application.builder() \
-                .token(os.getenv("TELEGRAM_TOKEN")) \
-                .updater(None) \
-                .build()
+            self.app = Application.builder().token(os.getenv("TELEGRAM_TOKEN")).updater(None).build()
 
             self.app.add_handler(CommandHandler("start", self.start))
             self.app.add_handler(CommandHandler("help", self.help))
@@ -60,26 +58,31 @@ class BotManager:
             await self.app.bot.set_webhook(webhook_url)
 
             self.initialized = True
-            logger.info("Бот успешно инициализирован")
+            logger.info("✅ Бот успешно инициализирован")
             return True
 
         except Exception as e:
-            logger.error(f"Ошибка инициализации: {e}")
+            logger.exception("❌ Ошибка инициализации бота")
             return False
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        await update.message.reply_text("🚀 Бот работает корректно!")
+        if update.message:
+            await update.message.reply_text("🚀 Бот работает корректно!")
 
     async def help(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        await update.message.reply_text(
-            "Я могу генерировать текст и изображения по вашему запросу.\n"
-            "Просто отправьте сообщение, а я всё сделаю!\n\n"
-            "Примеры:\n- Расскажи анекдот\n- Сгенерируй картинку кота в шляпе"
-        )
+        if update.message:
+            await update.message.reply_text(
+                "Я могу генерировать текст и изображения по вашему запросу.\n"
+                "Просто отправьте сообщение, а я всё сделаю!\n\n"
+                "Примеры:\n- Расскажи анекдот\n- Сгенерируй картинку кота в шляпе"
+            )
 
     async def handle_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not update.message:
+            return
+
         prompt = update.message.text
-        await update.message.chat.send_action("typing")
+        await update.message.chat.send_action(ChatAction.TYPING)
 
         try:
             if "картинк" in prompt.lower():
@@ -93,13 +96,13 @@ class BotManager:
                 result = await self.generate_response(prompt)
                 await update.message.reply_text(result, parse_mode="Markdown")
         except Exception as e:
+            logger.exception("Ошибка при обработке текста/изображения")
             await update.message.reply_text("⚠️ Произошла ошибка при генерации.")
-            logger.error(f"Ошибка генерации: {e}", exc_info=True)
 
-    async def generate_image(self, prompt: str) -> str:
+    async def generate_image(self, prompt: str) -> str | None:
         api_key = os.getenv("OPENROUTER_API_KEY")
         if not api_key:
-            logger.error("API-ключ OpenRouter не найден!")
+            logger.error("❌ API-ключ OpenRouter не найден!")
             return None
 
         headers = {
@@ -115,31 +118,24 @@ class BotManager:
         }
 
         try:
-            timeout = aiohttp.ClientTimeout(total=30)
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                url = "https://openrouter.ai/api/v1/images/generate"
-                async with session.post(url, headers=headers, json=payload) as resp:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
+                async with session.post("https://openrouter.ai/api/v1/images/generate", headers=headers, json=payload) as resp:
                     if resp.status != 200:
-                        logger.error(f"Ошибка изображения: {resp.status} - {await resp.text()}")
+                        logger.error(f"❌ Ошибка генерации изображения: {resp.status} - {await resp.text()}")
                         return None
 
                     data = await resp.json()
-                    if "data" in data and data["data"]:
-                        image_url = data["data"][0]["url"]
-                        logger.info(f"Сгенерированный URL изображения: {image_url}")
-                        return image_url
-                    else:
-                        logger.error(f"Ошибка генерации изображения: {data}")
-                        return None
+                    image_url = data.get("data", [{}])[0].get("url")
+                    logger.info(f"✅ Сгенерировано изображение: {image_url}")
+                    return image_url
         except Exception as e:
-            logger.error(f"Ошибка при запросе изображения: {e}")
+            logger.exception("❌ Ошибка запроса генерации изображения")
             return None
 
     async def generate_response(self, prompt: str) -> str:
         api_key = os.getenv("OPENROUTER_API_KEY")
         if not api_key:
-            logger.error("API-ключ OpenRouter не найден!")
-            return "⚠️ Ошибка: не найден API-ключ."
+            return "⚠️ Ошибка: отсутствует API-ключ."
 
         headers = {
             "Authorization": f"Bearer {api_key}",
@@ -152,21 +148,16 @@ class BotManager:
         }
 
         try:
-            timeout = aiohttp.ClientTimeout(total=30)
-            async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
                 async with session.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload) as resp:
                     if resp.status != 200:
-                        logger.error(f"Ошибка текста: {resp.status} - {await resp.text()}")
+                        logger.error(f"❌ Ошибка генерации текста: {resp.status} - {await resp.text()}")
                         return "⚠️ Сейчас сервер перегружен. Повторите позже."
 
                     data = await resp.json()
-                    if "choices" in data:
-                        return data["choices"][0]["message"]["content"].strip()
-                    else:
-                        logger.error(f"Ошибка OpenRouter: {data}")
-                        return "⚠️ Ошибка: не удалось получить ответ от AI."
+                    return data.get("choices", [{}])[0].get("message", {}).get("content", "⚠️ Нет ответа от модели.")
         except Exception as e:
-            logger.error(f"Ошибка при запросе текста: {e}")
+            logger.exception("❌ Ошибка запроса к OpenRouter")
             return "⚠️ Ошибка при обработке ответа API."
 
 # --- FastAPI-приложение ---
@@ -175,15 +166,12 @@ bot_manager = BotManager()
 
 @web_app.on_event("startup")
 async def startup_event():
-    initialized = await bot_manager.initialize()
-    if not initialized:
-        logger.error("Не удалось инициализировать бота при запуске.")
-        raise Exception("Ошибка инициализации бота.")
+    if not await bot_manager.initialize():
+        raise RuntimeError("❌ Бот не инициализирован.")
 
 @web_app.post("/webhook")
 async def handle_webhook(request: Request):
     if not bot_manager.initialized:
-        logger.error("Бот не инициализирован!")
         return JSONResponse(status_code=503, content={"status": "error", "message": "Bot not initialized"})
 
     try:
@@ -192,7 +180,7 @@ async def handle_webhook(request: Request):
         await bot_manager.app.process_update(update)
         return {"status": "ok"}
     except Exception as e:
-        logger.error(f"Ошибка обработки: {e}")
+        logger.exception("❌ Ошибка обработки webhook")
         return JSONResponse(status_code=500, content={"status": "error", "message": "Internal Server Error"})
 
 @web_app.get("/")
