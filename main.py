@@ -2,6 +2,7 @@ import logging
 import os
 import aiohttp
 import asyncio
+import openai
 from aiogram import Bot, Dispatcher, executor, types
 from pydub import AudioSegment
 from typing import Optional, Dict, Any
@@ -28,12 +29,6 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(bot)
 user_states: Dict[int, Dict[str, Any]] = {}
 
-# Константы
-IMAGE_MODEL = "stabilityai/stable-diffusion"
-TEXT_MODEL = "openchat/openchat-7b"
-WHISPER_MODEL = "whisper-1"
-IMAGE_SIZE = "512x512"
-
 class AudioProcessor:
     @staticmethod
     async def convert_ogg_to_mp3(ogg_path: str, mp3_path: str) -> None:
@@ -53,14 +48,29 @@ class AudioProcessor:
 
 class OpenAIClient:
     def __init__(self):
+        if not OPENROUTER_API_KEY:
+            raise ValueError("OPENROUTER_API_KEY не задан!")
+        
         self.api_key = OPENROUTER_API_KEY
         self.api_base = "https://openrouter.ai/api/v1"
+        self.image_model = "stabilityai/stable-diffusion"
+        self.text_model = "openchat/openchat-7b"
+        self.whisper_model = "whisper-1"
+        self.image_size = "512x512"
+        self.timeout = 30
+        
+        # Настройка клиента OpenAI
+        openai.api_key = self.api_key
+        openai.api_base = self.api_base
 
     async def transcribe_audio(self, audio_path: str) -> Optional[str]:
         """Транскрибирует аудио в текст"""
         try:
             with open(audio_path, "rb") as audio_file:
-                transcript = openai.Audio.transcribe(WHISPER_MODEL, audio_file)
+                transcript = openai.Audio.transcribe(
+                    self.whisper_model, 
+                    audio_file
+                )
                 return transcript["text"]
         except Exception as e:
             logger.error(f"Ошибка транскрибации: {e}")
@@ -70,8 +80,9 @@ class OpenAIClient:
         """Генерирует текстовый ответ"""
         try:
             response = openai.ChatCompletion.create(
-                model=TEXT_MODEL,
-                messages=[{"role": "user", "content": prompt}]
+                model=self.text_model,
+                messages=[{"role": "user", "content": prompt}],
+                timeout=self.timeout
             )
             return response['choices'][0]['message']['content']
         except Exception as e:
@@ -82,10 +93,11 @@ class OpenAIClient:
         """Генерирует изображение по промпту"""
         try:
             response = openai.Image.create(
-                model=IMAGE_MODEL,
+                model=self.image_model,
                 prompt=prompt,
                 n=1,
-                size=IMAGE_SIZE
+                size=self.image_size,
+                timeout=self.timeout
             )
             return response['data'][0]['url']
         except Exception as e:
@@ -94,8 +106,12 @@ class OpenAIClient:
 
 class ElevenLabsClient:
     def __init__(self):
+        if not ELEVEN_API_KEY:
+            raise ValueError("ELEVEN_API_KEY не задан!")
+            
         self.api_key = ELEVEN_API_KEY
         self.voice_id = ELEVEN_VOICE_ID
+        self.timeout = 30
 
     async def text_to_speech(self, text: str) -> Optional[bytes]:
         """Преобразует текст в речь"""
@@ -117,7 +133,8 @@ class ElevenLabsClient:
                 async with session.post(
                     f"https://api.elevenlabs.io/v1/text-to-speech/{self.voice_id}",
                     headers=headers,
-                    json=payload
+                    json=payload,
+                    timeout=self.timeout
                 ) as resp:
                     if resp.status == 200:
                         return await resp.read()
