@@ -11,6 +11,7 @@ from telegram.ext import (
     ContextTypes
 )
 from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 import uvicorn
 
 # --- Конфигурация логов ---
@@ -35,6 +36,12 @@ class BotManager:
         if self.initialized:
             return True
 
+        required_env = ["TELEGRAM_TOKEN", "OPENROUTER_API_KEY", "RENDER_SERVICE_NAME"]
+        missing = [key for key in required_env if not os.getenv(key)]
+        if missing:
+            logger.error(f"Отсутствуют переменные окружения: {', '.join(missing)}")
+            return False
+
         try:
             self.app = Application.builder() \
                 .token(os.getenv("TELEGRAM_TOKEN")) \
@@ -42,12 +49,14 @@ class BotManager:
                 .build()
 
             self.app.add_handler(CommandHandler("start", self.start))
+            self.app.add_handler(CommandHandler("help", self.help))
             self.app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_text))
 
             await self.app.initialize()
             await self.app.start()
 
-            webhook_url = f"https://{os.getenv('RENDER_SERVICE_NAME')}.onrender.com/webhook"
+            base_url = os.getenv("RENDER_EXTERNAL_URL") or f"https://{os.getenv('RENDER_SERVICE_NAME')}.onrender.com"
+            webhook_url = f"{base_url}/webhook"
             await self.app.bot.set_webhook(webhook_url)
 
             self.initialized = True
@@ -60,6 +69,13 @@ class BotManager:
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("🚀 Бот работает корректно!")
+
+    async def help(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        await update.message.reply_text(
+            "Я могу генерировать текст и изображения по вашему запросу.\n"
+            "Просто отправьте сообщение, а я всё сделаю!\n\n"
+            "Примеры:\n- Расскажи анекдот\n- Сгенерируй картинку кота в шляпе"
+        )
 
     async def handle_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         prompt = update.message.text
@@ -75,7 +91,7 @@ class BotManager:
                     await update.message.reply_text("⚠️ Ошибка при генерации изображения.")
             else:
                 result = await self.generate_response(prompt)
-                await update.message.reply_text(result)
+                await update.message.reply_text(result, parse_mode="Markdown")
         except Exception as e:
             await update.message.reply_text("⚠️ Произошла ошибка при генерации.")
             logger.error(f"Ошибка генерации: {e}", exc_info=True)
@@ -93,18 +109,18 @@ class BotManager:
 
         payload = {
             "prompt": prompt,
-            "model": "stability-ai/sdxl",  # Модель, которую вы используете
-            "width": 512,  # Пример размера изображения
+            "model": "stability-ai/sdxl",
+            "width": 512,
             "height": 512
         }
 
         try:
-            async with aiohttp.ClientSession() as session:
-                # Изменённый URL для генерации изображений
-                url = "https://openrouter.ai/api/v1/images/generate"  # Проверьте актуальность URL
+            timeout = aiohttp.ClientTimeout(total=30)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                url = "https://openrouter.ai/api/v1/images/generate"
                 async with session.post(url, headers=headers, json=payload) as resp:
                     if resp.status != 200:
-                        logger.error(f"Ошибка при запросе изображения: {resp.status} - {await resp.text()}")
+                        logger.error(f"Ошибка изображения: {resp.status} - {await resp.text()}")
                         return None
 
                     data = await resp.json()
@@ -124,24 +140,25 @@ class BotManager:
         if not api_key:
             logger.error("API-ключ OpenRouter не найден!")
             return "⚠️ Ошибка: не найден API-ключ."
-        
+
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json"
         }
 
         payload = {
-            "model": "openai/gpt-3.5-turbo",  # Модель для генерации текста
+            "model": "openai/gpt-3.5-turbo",
             "messages": [{"role": "user", "content": prompt}]
         }
 
         try:
-            async with aiohttp.ClientSession() as session:
+            timeout = aiohttp.ClientTimeout(total=30)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload) as resp:
                     if resp.status != 200:
-                        logger.error(f"Ошибка при запросе текста: {resp.status} - {await resp.text()}")
-                        return "⚠️ Ошибка при генерации ответа."
-                    
+                        logger.error(f"Ошибка текста: {resp.status} - {await resp.text()}")
+                        return "⚠️ Сейчас сервер перегружен. Повторите позже."
+
                     data = await resp.json()
                     if "choices" in data:
                         return data["choices"][0]["message"]["content"].strip()
@@ -167,7 +184,7 @@ async def startup_event():
 async def handle_webhook(request: Request):
     if not bot_manager.initialized:
         logger.error("Бот не инициализирован!")
-        return {"status": "error", "message": "Bot not initialized"}, 503
+        return JSONResponse(status_code=503, content={"status": "error", "message": "Bot not initialized"})
 
     try:
         data = await request.json()
@@ -176,7 +193,7 @@ async def handle_webhook(request: Request):
         return {"status": "ok"}
     except Exception as e:
         logger.error(f"Ошибка обработки: {e}")
-        return {"status": "error", "message": "Internal Server Error"}, 500
+        return JSONResponse(status_code=500, content={"status": "error", "message": "Internal Server Error"})
 
 @web_app.get("/")
 async def health_check():
