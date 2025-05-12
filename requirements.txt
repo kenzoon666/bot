@@ -1,5 +1,5 @@
-aiogram==2.25.1
-openai
+aiogram==2.25.2
 python-dotenv
+openai
 pydub
 aiohttp
