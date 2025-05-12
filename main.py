@@ -10,6 +10,10 @@ load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+
+if not BOT_TOKEN or not OPENROUTER_API_KEY:
+    raise ValueError("BOT_TOKEN и/или OPENROUTER_API_KEY не заданы!")
+
 openai.api_key = OPENROUTER_API_KEY
 openai.api_base = "https://openrouter.ai/api/v1"
 
@@ -17,8 +21,6 @@ logging.basicConfig(level=logging.INFO)
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(bot)
-
-# Храним состояние пользователя
 user_states = {}
 
 @dp.message_handler(commands=['start'])
@@ -78,25 +80,12 @@ async def handle_voice(message: types.Message):
     await message.reply(f"Вы сказали: {user_text}")
 
     reply_text = await gpt_response(user_text)
+    await message.reply(reply_text)
 
-    audio_response = openai.Audio.speech.create(
-        model="elevenlabs-tts",
-        voice="nova",
-        input=reply_text
-    )
-
-    out_file = f"response_{message.from_user.id}.mp3"
-    with open(out_file, "wb") as f:
-        f.write(audio_response.content)
-
-    with open(out_file, "rb") as f:
-        await message.reply_voice(f, caption=reply_text)
-
-    for file in [ogg_file, mp3_file, out_file]:
+    for file in [ogg_file, mp3_file]:
         if os.path.exists(file):
             os.remove(file)
 
-# GPT-ответ
 async def gpt_response(prompt):
     response = openai.ChatCompletion.create(
         model="openchat/openchat-7b",
@@ -104,7 +93,6 @@ async def gpt_response(prompt):
     )
     return response['choices'][0]['message']['content']
 
-# Генерация изображений
 async def generate_image(prompt: str):
     try:
         response = openai.Image.create(
@@ -118,6 +106,5 @@ async def generate_image(prompt: str):
         print(f"Image generation error: {e}")
         return None
 
-# Запуск
 if __name__ == '__main__':
     executor.start_polling(dp, skip_updates=True)
