@@ -24,6 +24,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # --- Класс бота ---
+# --- Класс бота ---
 class BotManager:
     _instance = None
 
@@ -47,7 +48,6 @@ class BotManager:
         try:
             self.app = Application.builder().token(os.getenv("TELEGRAM_TOKEN")).updater(None).build()
 
-            # Добавляем обработчики
             self.app.add_handler(CommandHandler("start", self.start))
             self.app.add_handler(CommandHandler("help", self.help))
             self.app.add_handler(CommandHandler("menu", self.show_menu))  # ← новая команда
@@ -73,12 +73,12 @@ class BotManager:
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if update.message:
             keyboard = [
-                [KeyboardButton("🎨 Генерация аватара по описанию")],
-                [KeyboardButton("🖼️ Сгенерировать изображение")],
-                [KeyboardButton("🎧 Преобразовать текст в голос")],
-                [KeyboardButton("🎙️ Распознать голосовое сообщение")]
+                [InlineKeyboardButton("🎨 Генерация аватара по описанию", callback_data='generate_avatar')],
+                [InlineKeyboardButton("🖼️ Сгенерировать изображение", callback_data='generate_image')],
+                [InlineKeyboardButton("🎧 Преобразовать текст в голос", callback_data='text_to_speech')],
+                [InlineKeyboardButton("🎙️ Распознать голосовое сообщение", callback_data='voice_to_text')],
             ]
-            reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+            reply_markup = InlineKeyboardMarkup(keyboard)
             await update.message.reply_text("🚀 Бот работает корректно! Выберите опцию:", reply_markup=reply_markup)
 
     async def help(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
