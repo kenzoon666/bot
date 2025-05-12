@@ -47,6 +47,7 @@ class BotManager:
         try:
             self.app = Application.builder().token(os.getenv("TELEGRAM_TOKEN")).updater(None).build()
 
+            # Добавляем обработчики
             self.app.add_handler(CommandHandler("start", self.start))
             self.app.add_handler(CommandHandler("help", self.help))
             self.app.add_handler(CommandHandler("menu", self.show_menu))  # ← новая команда
@@ -87,6 +88,32 @@ class BotManager:
                 "Выберите опцию с клавиатуры или введите сообщение.\n\n"
                 "Примеры:\n- Сгенерируй картинку кота\n- Преобразуй этот текст в речь\n- Распознай голосовое сообщение"
             )
+
+    async def show_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        keyboard = [
+            [InlineKeyboardButton("🎨 Генерация аватара по описанию", callback_data='generate_avatar')],
+            [InlineKeyboardButton("🖼️ Сгенерировать изображение", callback_data='generate_image')],
+            [InlineKeyboardButton("🎧 Преобразовать текст в голос", callback_data='text_to_speech')],
+            [InlineKeyboardButton("🎙️ Распознать голосовое сообщение", callback_data='voice_to_text')],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        if update.message:
+            await update.message.reply_text("Выберите действие:", reply_markup=reply_markup)
+
+    async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        query = update.callback_query
+        await query.answer()
+        data = query.data
+        if data == 'generate_avatar':
+            await query.edit_message_text("Введите описание для генерации аватара 🎨")
+        elif data == 'generate_image':
+            await query.edit_message_text("Отправьте описание изображения 🖼️")
+        elif data == 'text_to_speech':
+            await query.edit_message_text("Отправьте текст для озвучки 🎧")
+        elif data == 'voice_to_text':
+            await query.edit_message_text("Отправьте голосовое сообщение 🎙️")
+        else:
+            await query.edit_message_text("Неизвестная команда.")
 
     async def handle_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not update.message:
@@ -189,31 +216,6 @@ bot_manager = BotManager()
 async def startup_event():
     if not await bot_manager.initialize():
         raise RuntimeError("❌ Бот не инициализирован.")
-    async def show_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        keyboard = [
-            [InlineKeyboardButton("🎨 Генерация аватара по описанию", callback_data='generate_avatar')],
-            [InlineKeyboardButton("🖼️ Сгенерировать изображение", callback_data='generate_image')],
-            [InlineKeyboardButton("🎧 Преобразовать текст в голос", callback_data='text_to_speech')],
-            [InlineKeyboardButton("🎙️ Распознать голосовое сообщение", callback_data='voice_to_text')],
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        if update.message:
-            await update.message.reply_text("Выберите действие:", reply_markup=reply_markup)
-
-    async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        query = update.callback_query
-        await query.answer()
-        data = query.data
-        if data == 'generate_avatar':
-            await query.edit_message_text("Введите описание для генерации аватара 🎨")
-        elif data == 'generate_image':
-            await query.edit_message_text("Отправьте описание изображения 🖼️")
-        elif data == 'text_to_speech':
-            await query.edit_message_text("Отправьте текст для озвучки 🎧")
-        elif data == 'voice_to_text':
-            await query.edit_message_text("Отправьте голосовое сообщение 🎙️")
-        else:
-            await query.edit_message_text("Неизвестная команда.")
 
 @web_app.post("/webhook")
 async def handle_webhook(request: Request):
@@ -226,16 +228,8 @@ async def handle_webhook(request: Request):
         await bot_manager.app.process_update(update)
         return {"status": "ok"}
     except Exception as e:
-        logger.exception("❌ Ошибка обработки webhook")
-        return JSONResponse(status_code=500, content={"status": "error", "message": "Internal Server Error"})
-
-@web_app.get("/")
-async def health_check():
-    return {
-        "status": "running",
-        "bot_initialized": bot_manager.initialized
-    }
+        logger.exception("❌ Ошибка в webhook")
+        return JSONResponse(status_code=400, content={"status": "error", "message": str(e)})
 
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", 10000))
-    uvicorn.run(web_app, host="0.0.0.0", port=port)
+    uvicorn.run(web_app, host="0.0.0.0", port=8000)
