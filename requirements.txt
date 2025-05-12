@@ -1,6 +1,5 @@
-python-telegram-bot==20.3
-aiohttp==3.8.4
+aiogram==2.25.1
 openai
-python-dotenv==1.0.0
-fastapi==0.95.2
-uvicorn==0.22.0
+python-dotenv
+pydub
+aiohttp
