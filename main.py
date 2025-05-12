@@ -88,6 +88,10 @@ class BotManager:
         if self.initialized:
             return True
 
+        # Проверка конфигурации
+        logger.info(f"Telegram Token: {self.config.TELEGRAM_TOKEN[:5]}...")
+        logger.info(f"OpenRouter Key: {self.config.OPENROUTER_API_KEY[:5]}...")
+
         if not all([self.config.TELEGRAM_TOKEN, self.config.OPENROUTER_API_KEY]):
             logger.error("❌ Missing required environment variables")
             return False
@@ -108,14 +112,42 @@ class BotManager:
 
             if self.config.WEBHOOK_URL:
                 await self._setup_webhook()
+            else:
+                logger.warning("Webhook URL not set, using polling")
+                await self.app.updater.start_polling()
 
             self.initialized = True
             logger.info("✅ Bot initialized successfully")
+            
+            # Проверка доступности API
+            await self._check_apis()
+            
             return True
 
         except Exception as e:
             logger.exception("❌ Bot initialization failed")
             return False
+
+    async def _check_apis(self):
+        """Проверка доступности API сервисов"""
+        try:
+            # Проверка Telegram API
+            bot_info = await self.app.bot.get_me()
+            logger.info(f"Bot info: @{bot_info.username}")
+            
+            # Проверка OpenRouter API
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    "https://openrouter.ai/api/v1/models",
+                    headers={"Authorization": f"Bearer {self.config.OPENROUTER_API_KEY}"},
+                    timeout=10
+                ) as resp:
+                    if resp.status == 200:
+                        logger.info("OpenRouter API is available")
+                    else:
+                        logger.error(f"OpenRouter API check failed: {resp.status}")
+        except Exception as e:
+            logger.error(f"API check error: {str(e)}")
 
     def _register_handlers(self):
         handlers = [
@@ -123,6 +155,7 @@ class BotManager:
             CommandHandler("help", self.help),
             CommandHandler("menu", self.show_menu),
             CommandHandler("cancel", self.cancel),
+            CommandHandler("test", self.test_command),
             CallbackQueryHandler(self.handle_callback),
             MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_text),
             MessageHandler(filters.VOICE, self.handle_voice),
@@ -141,6 +174,10 @@ class BotManager:
                 allowed_updates=["message", "callback_query"]
             )
             logger.info(f"✅ Webhook set to {self.config.WEBHOOK_URL}")
+            
+            # Получение информации о вебхуке
+            webhook_info = await self.app.bot.get_webhook_info()
+            logger.info(f"Webhook info: {webhook_info.url}, pending updates: {webhook_info.pending_update_count}")
         except Exception as e:
             logger.error(f"❌ Failed to set webhook: {e}")
 
@@ -179,13 +216,37 @@ class BotManager:
         )
 
     @error_handler
+    async def test_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Тестовая команда для проверки работы"""
+        await update.message.reply_text("🔄 Тестируем соединение...")
+        
+        # Проверка Telegram API
+        bot_info = await self.app.bot.get_me()
+        
+        # Проверка OpenRouter API
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                "https://openrouter.ai/api/v1/models",
+                headers={"Authorization": f"Bearer {self.config.OPENROUTER_API_KEY}"},
+                timeout=10
+            ) as resp:
+                models_status = resp.status
+        
+        await update.message.reply_text(
+            f"✅ Телеграм бот: @{bot_info.username}\n"
+            f"🔗 OpenRouter статус: {models_status}\n"
+            f"🖼 Генерация изображений: {'включена' if self.config.OPENROUTER_API_KEY else 'выключена'}"
+        )
+
+    @error_handler
     async def help(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработка команды /help"""
         help_text = (
             "📌 <b>Доступные команды:</b>\n"
             "/start - Главное меню\n"
             "/menu - Альтернативное меню\n"
-            "/cancel - Отменить текущее действие\n\n"
+            "/cancel - Отменить текущее действие\n"
+            "/test - Проверить соединение\n\n"
             "🖼️ <b>Генерация изображений:</b>\n"
             "Просто отправьте описание того, что хотите создать\n\n"
             "🎙️ <b>Голосовые сообщения:</b>\n"
@@ -285,12 +346,17 @@ class BotManager:
             await update.message.reply_text("⏳ Генерирую изображение...")
             
             model = "stability-ai/sdxl" if state == 'waiting_for_image_prompt' else "stability-ai/stable-diffusion-xl"
+            logger.info(f"Generating image with model: {model}, prompt: '{text[:50]}...'")
+            
             image_url = await self.generate_image(text, model)
             
             if image_url:
                 await update.message.reply_photo(image_url)
+                logger.info("Image successfully generated and sent")
             else:
-                await update.message.reply_text("⚠️ Не удалось сгенерировать изображение. Проверьте описание.")
+                error_msg = "⚠️ Не удалось сгенерировать изображение. Возможные причины:\n- Неподдерживаемый запрос\n- Проблемы с API\n- Недостаточно средств на счету"
+                await update.message.reply_text(error_msg)
+                logger.error("Image generation failed")
             
             self.user_states.pop(user_id, None)
         except Exception as e:
@@ -306,7 +372,6 @@ class BotManager:
     @error_handler
     async def handle_voice(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработка голосовых сообщений"""
-        # Реальная реализация должна использовать Speech-to-Text API
         await update.message.reply_text("🎙️ Голосовые сообщения пока не поддерживаются")
 
     async def generate_image(self, prompt: str, model: str) -> Optional[str]:
@@ -316,11 +381,13 @@ class BotManager:
 
         headers = {
             "Authorization": f"Bearer {self.config.OPENROUTER_API_KEY}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://telegram.org",  # Обязательно для OpenRouter
+            "X-Title": "Telegram Bot"  # Идентификатор приложения
         }
 
         payload = {
-            "prompt": prompt,
+            "prompt": prompt[:1000],  # Ограничение длины
             "model": model,
             "width": 1024,
             "height": 1024,
@@ -335,16 +402,26 @@ class BotManager:
                     headers=headers,
                     json=payload
                 ) as resp:
+                    response_text = await resp.text()
+                    logger.info(f"OpenRouter response: {resp.status} {response_text[:200]}...")
+                    
                     if resp.status != 200:
-                        error = await resp.text()
-                        logger.error(f"Image generation failed: {resp.status} - {error}")
+                        logger.error(f"OpenRouter error: {response_text}")
                         return None
 
                     data = await resp.json()
-                    return data.get("data", [{}])[0].get("url")
+                    if not data.get('data'):
+                        logger.error("No 'data' in response")
+                        return None
+                        
+                    return data['data'][0]['url']
+                    
+        except aiohttp.ClientError as e:
+            logger.error(f"HTTP error: {str(e)}")
         except Exception as e:
-            logger.exception("Image generation request failed")
-            return None
+            logger.exception("Unexpected error in generate_image")
+            
+        return None
 
     async def generate_response(self, prompt: str) -> str:
         """Генерация текстового ответа через OpenRouter API"""
@@ -353,32 +430,36 @@ class BotManager:
 
         headers = {
             "Authorization": f"Bearer {self.config.OPENROUTER_API_KEY}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://telegram.org",
+            "X-Title": "Telegram Bot"
         }
 
         payload = {
-            "model": "openai/gpt-4",
+            "model": "openai/gpt-3.5-turbo",  # Используем более стабильную модель
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.7
         }
 
         try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
+            async with aiohttp.ClientSession() as session:
                 async with session.post(
                     "https://openrouter.ai/api/v1/chat/completions",
                     headers=headers,
-                    json=payload
+                    json=payload,
+                    timeout=30
                 ) as resp:
                     if resp.status != 200:
                         error = await resp.text()
-                        logger.error(f"Chat request failed: {resp.status} - {error}")
-                        return "⚠️ Ошибка при обработке запроса"
+                        logger.error(f"OpenRouter error: {error}")
+                        return "⚠️ Ошибка сервиса, попробуйте позже"
 
                     data = await resp.json()
-                    return data.get("choices", [{}])[0].get("message", {}).get("content", "⚠️ Нет ответа")
+                    return data['choices'][0]['message']['content']
+                    
         except Exception as e:
-            logger.exception("Chat request failed")
-            return "⚠️ Ошибка при обработке запроса"
+            logger.exception("Error in generate_response")
+            return "⚠️ Внутренняя ошибка бота"
 
 # --- FastAPI приложение ---
 web_app = FastAPI()
@@ -388,6 +469,13 @@ bot_manager = BotManager()
 async def startup_event():
     if not await bot_manager.initialize():
         raise RuntimeError("Bot initialization failed")
+
+@web_app.get("/")
+async def root():
+    return {
+        "status": "running",
+        "bot": await bot_manager.app.bot.get_me() if bot_manager.app else None
+    }
 
 @web_app.post("/webhook")
 async def handle_webhook(request: Request):
