@@ -189,6 +189,31 @@ bot_manager = BotManager()
 async def startup_event():
     if not await bot_manager.initialize():
         raise RuntimeError("❌ Бот не инициализирован.")
+    async def show_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        keyboard = [
+            [InlineKeyboardButton("🎨 Генерация аватара по описанию", callback_data='generate_avatar')],
+            [InlineKeyboardButton("🖼️ Сгенерировать изображение", callback_data='generate_image')],
+            [InlineKeyboardButton("🎧 Преобразовать текст в голос", callback_data='text_to_speech')],
+            [InlineKeyboardButton("🎙️ Распознать голосовое сообщение", callback_data='voice_to_text')],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        if update.message:
+            await update.message.reply_text("Выберите действие:", reply_markup=reply_markup)
+
+    async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        query = update.callback_query
+        await query.answer()
+        data = query.data
+        if data == 'generate_avatar':
+            await query.edit_message_text("Введите описание для генерации аватара 🎨")
+        elif data == 'generate_image':
+            await query.edit_message_text("Отправьте описание изображения 🖼️")
+        elif data == 'text_to_speech':
+            await query.edit_message_text("Отправьте текст для озвучки 🎧")
+        elif data == 'voice_to_text':
+            await query.edit_message_text("Отправьте голосовое сообщение 🎙️")
+        else:
+            await query.edit_message_text("Неизвестная команда.")
 
 @web_app.post("/webhook")
 async def handle_webhook(request: Request):
