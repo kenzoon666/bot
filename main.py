@@ -2,14 +2,15 @@ import os
 import logging
 import asyncio
 import aiohttp
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
 from telegram.constants import ChatAction
 from telegram.ext import (
     Application,
     CommandHandler,
     MessageHandler,
     filters,
-    ContextTypes
+    ContextTypes,
+    CallbackQueryHandler  # <- добавлен импорт
 )
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -183,31 +184,6 @@ class BotManager:
 # --- FastAPI-приложение ---
 web_app = FastAPI()
 bot_manager = BotManager()
-async def show_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        keyboard = [
-            [InlineKeyboardButton("🎨 Генерация аватара по описанию", callback_data='generate_avatar')],
-            [InlineKeyboardButton("🖼️ Сгенерировать изображение", callback_data='generate_image')],
-            [InlineKeyboardButton("🎧 Преобразовать текст в голос", callback_data='text_to_speech')],
-            [InlineKeyboardButton("🎙️ Распознать голосовое сообщение", callback_data='voice_to_text')],
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-
-        if update.message:
-            await update.message.reply_text("Выберите действие:", reply_markup=reply_markup)
-
-async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):query = update.callback_query
-    await query.answer()
-        data = query.data
-    if data == 'generate_avatar':
-        await query.edit_message_text("Введите описание для генерации аватара 🎨")
-    elif data == 'generate_image':
-        await query.edit_message_text("Отправьте описание изображения 🖼️")
-    elif data == 'text_to_speech':
-        await query.edit_message_text("Отправьте текст для озвучки 🎧")
-    elif data == 'voice_to_text':
-        await query.edit_message_text("Отправьте голосовое сообщение 🎙️")
-    else:
-        await query.edit_message_text("Неизвестная команда.")
 
 @web_app.on_event("startup")
 async def startup_event():
