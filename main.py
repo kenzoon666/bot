@@ -4,16 +4,11 @@ import openai
 import aiohttp
 from aiogram import Bot, Dispatcher, executor, types
 from pydub import AudioSegment
-from dotenv import load_dotenv
 
-load_dotenv()
-
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-ELEVEN_API_KEY = os.getenv("ELEVEN_API_KEY")
-
-if not BOT_TOKEN or not OPENROUTER_API_KEY or not ELEVEN_API_KEY:
-    raise ValueError("BOT_TOKEN, OPENROUTER_API_KEY или ELEVEN_API_KEY не заданы!")
+# Получаем переменные окружения напрямую
+BOT_TOKEN = os.environ["BOT_TOKEN"]
+OPENROUTER_API_KEY = os.environ["OPENROUTER_API_KEY"]
+ELEVEN_API_KEY = os.environ["ELEVEN_API_KEY"]
 
 openai.api_key = OPENROUTER_API_KEY
 openai.api_base = "https://openrouter.ai/api/v1"
@@ -84,7 +79,7 @@ async def handle_voice(message: types.Message):
     reply_text = await gpt_response(user_text)
 
     # Озвучка через ElevenLabs
-    voice_id = "21m00Tcm4TlvDq8ikWAM"  # голос Nova, можно заменить
+    voice_id = "21m00Tcm4TlvDq8ikWAM"  # голос Nova
     headers = {
         "xi-api-key": ELEVEN_API_KEY,
         "Content-Type": "application/json"
