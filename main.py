@@ -164,9 +164,15 @@ async def on_startup(app): await bot.set_webhook(url=WEBHOOK_URL, drop_pending_u
 async def on_shutdown(app): await bot.delete_webhook(); logger.info("Бот остановлен")
 
 if __name__ == '__main__':
+    from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
+    from aiohttp import web
+
     app = web.Application()
     app.on_startup.append(on_startup)
     app.on_shutdown.append(on_shutdown)
+
     SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path=WEBHOOK_PATH)
     setup_application(app, dp, bot=bot)
+
+    logging.info(f"Запуск на порту: {WEBAPP_PORT}")
     web.run_app(app, host="0.0.0.0", port=WEBAPP_PORT)
