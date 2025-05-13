@@ -52,16 +52,27 @@ class AudioProcessor:
             if f and os.path.exists(f):
                 os.remove(f)
 
-async def openrouter_chat(prompt: str) -> str:
-    headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "model": "openrouter/cinematika-7b",  # можно заменить на другую
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.7
-    }
+    async def openrouter_chat(prompt: str) -> str:
+        headers = {
+            "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "model": "openrouter/cinematika-7b",
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.7
+        }
+    async with aiohttp.ClientSession() as session:
+        async with session.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            json=payload,
+            headers=headers
+        ) as r:
+            if r.status != 200:
+                logger.error(f"OpenRouter error: {await r.text()}")
+                return None
+            res = await r.json()
+            return res['choices'][0]['message']['content']
     async with aiohttp.ClientSession() as session:
         async with session.post(url, ...) as r:
     if r.status != 200:
@@ -103,71 +114,28 @@ async def speech_to_text(file_path: str) -> Optional[str]:
 # Команды
 @dp.message(Command("start", "help"))
 async def cmd_start(msg: types.Message):
+    if msg.from_user.id not in user_states:
+        user_states[msg.from_user.id] = {"waiting_for_image_prompt": False}
+    
     kb = types.ReplyKeyboardMarkup(resize_keyboard=True, keyboard=[
         [types.KeyboardButton(text="🎤 Говори")],
         [types.KeyboardButton(text="🖼 Генерировать картинку")]
     ])
-    user_states[msg.from_user.id] = {"waiting_for_image_prompt": False}
     await msg.answer("Привет! Я бот 🤖. Что хочешь сделать?", reply_markup=kb)
 
-@dp.message(F.voice)
-async def handle_voice(msg: types.Message):
-    """Обработка голосовых сообщений с улучшенной обработкой ошибок"""
-    user_id = msg.from_user.id
-    
-    # Инициализация состояния
-    if user_id not in user_states:
-        user_states[user_id] = {"waiting_for_image_prompt": False}
+@dp.message(F.text == "🎤 Говори")
+async def handle_voice_request(msg: types.Message):
+    if msg.from_user.id not in user_states:
+        user_states[msg.from_user.id] = {"waiting_for_image_prompt": False}
+    await msg.reply("Отправь мне голосовое сообщение 🎙️")
 
-    # Временные файлы
-    ogg_path = f"temp_{user_id}.ogg"
-    mp3_path = f"temp_{user_id}.mp3"
-    
-    try:
-        # 1. Скачивание голосового
-        voice = msg.voice
-        file = await bot.get_file(voice.file_id)
-        await bot.download_file(file.file_path, destination=ogg_path)
-        
-        # 2. Конвертация в MP3
-        await AudioProcessor.convert_ogg_to_mp3(ogg_path, mp3_path)
-        
-        # 3. Распознавание текста
-        text = await speech_to_text(mp3_path)
-        if not text:
-            await msg.reply("🔇 Не удалось распознать речь")
-            return
-            
-        # 4. Генерация ответа
-        reply = await openrouter_chat(text)
-        if not reply:
-            await msg.reply("🤖 Ошибка генерации ответа")
-            return
-            
-        # 5. Синтез речи
-        audio_bytes = await text_to_speech(reply)
-        if audio_bytes:
-            await msg.answer_voice(
-                voice=types.BufferedInputFile(
-                    audio_bytes,
-                    filename="response.ogg"
-                ),
-                caption="Ответ голосом"
-            )
-        else:
-            await msg.reply(f"💬 Текстовый ответ:\n\n{reply}")
-            
-    except aiohttp.ClientError as e:
-        logger.error(f"API error: {str(e)}")
-        await msg.reply("🌐 Ошибка подключения к внешнему сервису")
-        
-    except Exception as e:
-        logger.error(f"Unexpected error: {str(e)}", exc_info=True)
-        await msg.reply("⚠️ Непредвиденная ошибка")
-        
-    finally:
-        # Очистка временных файлов
-        await AudioProcessor.cleanup(ogg_path, mp3_path)
+@dp.message(F.text == "🖼 Генерировать картинку")
+async def handle_image_request(msg: types.Message):
+    if msg.from_user.id not in user_states:
+        user_states[msg.from_user.id] = {"waiting_for_image_prompt": True}
+    else:
+        user_states[msg.from_user.id]["waiting_for_image_prompt"] = True
+    await msg.reply("Опиши изображение, которое нужно создать:")
 
 @dp.message(F.text == "🖼 Генерировать картинку")
 async def handle_image_request(msg: types.Message):
