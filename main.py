@@ -33,7 +33,7 @@ WEBHOOK_HOST = env['WEBHOOK_HOST']
 ELEVEN_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"
 WEBHOOK_PATH = f"/webhook/{BOT_TOKEN}"
 WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
-WEBAPP_PORT = int(os.getenv("PORT", "8000"))
+WEBAPP_PORT = int(os.getenv("PORT", "10000"))
 
 bot = Bot(token=BOT_TOKEN, parse_mode=ParseMode.HTML)
 dp = Dispatcher(storage=MemoryStorage())
