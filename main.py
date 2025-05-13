@@ -9,6 +9,8 @@ from pydub import AudioSegment
 from typing import Optional, Dict, Any
 import openai
 
+logging.basicConfig(level=logging.INFO)
+
 # Проверка и загрузка переменных окружения
 def check_env_vars():
     required_vars = {
@@ -38,41 +40,43 @@ print(f"OPENROUTER_API_KEY: {'установлен' if OPENROUTER_API_KEY else '
 print(f"ELEVEN_API_KEY: {'установлен' if ELEVEN_API_KEY else 'НЕ УСТАНОВЛЕН'}")
 print(f"WEBHOOK_HOST: {'установлен' if WEBHOOK_HOST else 'НЕ УСТАНОВЛЕН'}")
 
-# Конфигурация
 ELEVEN_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"
 WEBHOOK_PATH = f"/webhook/{BOT_TOKEN}"
 WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
 WEBAPP_PORT = int(os.getenv("PORT", "8000"))
 
-# Инициализация
 bot = Bot(token=BOT_TOKEN, parse_mode=ParseMode.HTML)
 dp = Dispatcher(storage=MemoryStorage())
 user_states: Dict[int, Dict[str, Any]] = {}
 
-# Обработка аудио
 class AudioProcessor:
     @staticmethod
     async def convert_ogg_to_mp3(ogg_path: str, mp3_path: str) -> None:
-        audio = AudioSegment.from_file(ogg_path)
-        audio.export(mp3_path, format="mp3", bitrate="64k")
+        try:
+            audio = AudioSegment.from_file(ogg_path)
+            audio.export(mp3_path, format="mp3", bitrate="64k")
+        except Exception as e:
+            logging.error(f"Ошибка конвертации аудио: {e}")
 
     @staticmethod
     async def cleanup_files(*files: str) -> None:
         for file in files:
-            if file and os.path.exists(file):
-                os.remove(file)
+            try:
+                if file and os.path.exists(file):
+                    os.remove(file)
+            except Exception as e:
+                logging.warning(f"Не удалось удалить файл {file}: {e}")
 
-# Обработчики
 @dp.message(Command("start", "help"))
 async def cmd_start(message: types.Message):
     kb = types.ReplyKeyboardMarkup(keyboard=[
-        [types.KeyboardButton(text="🎤 Говори")],
+        [types.KeyboardButton(text="🌜 Говори")],
         [types.KeyboardButton(text="🖼 Генерировать картинку")]
     ], resize_keyboard=True)
     await message.answer("Привет! Я бот 🤖. Что хочешь сделать?", reply_markup=kb)
     user_states[message.from_user.id] = {"waiting_for_image_prompt": False}
 
-@dp.message(F.text == "🎤 Говори")
+@dp.message(F.text == "🌜 Говори")
 async def handle_voice_request(message: types.Message):
     user_states[message.from_user.id] = {"waiting_for_image_prompt": False}
     await message.reply("Отправь мне голосовое сообщение 🎙️")
@@ -82,7 +86,90 @@ async def handle_image_request(message: types.Message):
     user_states[message.from_user.id] = {"waiting_for_image_prompt": True}
     await message.reply("Опиши изображение, которое нужно создать:")
 
-# Вебхук
+@dp.message(F.voice)
+async def handle_voice(message: types.Message):
+    user_id = message.from_user.id
+    try:
+        voice = message.voice
+        file = await bot.get_file(voice.file_id)
+        ogg_path = f"voice_{user_id}.ogg"
+        mp3_path = f"voice_{user_id}.mp3"
+        await bot.download_file(file.file_path, destination=ogg_path)
+        await AudioProcessor.convert_ogg_to_mp3(ogg_path, mp3_path)
+
+        headers = {
+            "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        with open(mp3_path, "rb") as audio_file:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    "https://openrouter.ai/api/v1/audio/transcriptions",
+                    headers=headers,
+                    data=audio_file
+                ) as resp:
+                    result = await resp.json()
+                    text = result.get("text", "Не удалось распознать речь")
+                    await message.reply(f"Ты сказал: {text}")
+
+        await AudioProcessor.cleanup_files(ogg_path, mp3_path)
+    except Exception as e:
+        logging.error(f"Ошибка обработки голосового: {e}")
+        await message.reply("Произошла ошибка при обработке голосового сообщения.")
+
+@dp.message(F.text)
+async def handle_text(message: types.Message):
+    user_id = message.from_user.id
+    state = user_states.get(user_id, {})
+    text = message.text.strip()
+
+    if state.get("waiting_for_image_prompt"):
+        try:
+            headers = {
+                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                "Content-Type": "application/json"
+            }
+            payload = {
+                "model": "openai/dall-e-3",
+                "prompt": text,
+                "n": 1,
+                "size": "1024x1024"
+            }
+            async with aiohttp.ClientSession() as session:
+                async with session.post("https://openrouter.ai/api/v1/images/generations", json=payload, headers=headers) as resp:
+                    result = await resp.json()
+                    if resp.status == 200 and result.get("data"):
+                        image_url = result["data"][0]["url"]
+                        await message.reply_photo(image_url)
+                    else:
+                        await message.reply("Не удалось сгенерировать изображение.")
+        except Exception as e:
+            logging.error(f"Ошибка генерации изображения: {e}")
+            await message.reply("Произошла ошибка при генерации изображения.")
+        finally:
+            user_states[user_id]["waiting_for_image_prompt"] = False
+    else:
+        try:
+            headers = {
+                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                "Content-Type": "application/json"
+            }
+            payload = {
+                "model": "openai/gpt-4",
+                "messages": [
+                    {"role": "system", "content": "Ты — доброжелательный Telegram-бот."},
+                    {"role": "user", "content": text}
+                ]
+            }
+            async with aiohttp.ClientSession() as session:
+                async with session.post("https://openrouter.ai/api/v1/chat/completions", json=payload, headers=headers) as resp:
+                    result = await resp.json()
+                    reply = result.get("choices", [{}])[0].get("message", {}).get("content", "Не удалось получить ответ.")
+                    await message.reply(reply)
+        except Exception as e:
+            logging.error(f"Ошибка генерации ответа: {e}")
+            await message.reply("Произошла ошибка при генерации ответа.")
+
 async def on_startup(app):
     await bot.set_webhook(url=WEBHOOK_URL, drop_pending_updates=True)
     logging.info(f"Бот запущен. Вебхук: {WEBHOOK_URL}")
