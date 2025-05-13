@@ -75,19 +75,40 @@ async def openrouter_chat(prompt: str) -> Optional[str]:
             res = await r.json()
             return res['choices'][0]['message']['content']
 
+REPLICATE_API_TOKEN = os.getenv("REPLICATE_API_TOKEN")
+
 async def generate_image(prompt: str) -> Optional[str]:
+    url = "https://api.replicate.com/v1/predictions"
     headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Authorization": f"Token {REPLICATE_API_TOKEN}",
         "Content-Type": "application/json"
     }
     payload = {
-        "model": "openrouter/latent-consistency-v1",
-        "prompt": prompt
+        "version": "a9758cbf54c25c5dfc0a7ce37230c3f4e53d2f24eec307341cfc50ca38e5c11c",  # SDXL
+        "input": {
+            "prompt": prompt
+        }
     }
+
     async with aiohttp.ClientSession() as session:
-        async with session.post("https://openrouter.ai/api/v1/images/generations", json=payload, headers=headers) as r:
-            res = await r.json()
-            return res["data"][0]["url"] if "data" in res else None
+        async with session.post(url, json=payload, headers=headers) as resp:
+            if resp.status != 201:
+                logger.error(f"Ошибка Replicate: {await resp.text()}")
+                return None
+            data = await resp.json()
+            get_url = data["urls"]["get"]
+
+        # ждём результат
+        for _ in range(20):
+            await asyncio.sleep(1)
+            async with session.get(get_url, headers=headers) as r:
+                result = await r.json()
+                if result["status"] == "succeeded":
+                    return result["output"][0]
+                elif result["status"] == "failed":
+                    logger.error("Генерация провалилась")
+                    return None
+        return None
 
 async def text_to_speech(text: str) -> Optional[bytes]:
     url = f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVEN_VOICE_ID}"
@@ -196,17 +217,6 @@ async def health_check(request):
 
 if __name__ == '__main__':
     async def main():
-        # Для тестирования можно сначала использовать polling
-        try:
-            # Проверка работы бота через polling
-            logger.info("Пробуем запустить бота через polling для тестирования...")
-            await bot.delete_webhook(drop_pending_updates=True)
-            await dp.start_polling(bot)
-            return
-        except Exception as e:
-            logger.error(f"Polling не сработал: {e}")
-            logger.info("Пробуем запустить через вебхук...")
-
         app = web.Application()
         app.router.add_get('/', health_check)
         app.on_startup.append(on_startup)
