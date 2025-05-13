@@ -112,6 +112,7 @@ async def speech_to_text(file_path: str) -> Optional[str]:
 # ==== Хендлеры ====
 @dp.message(Command("start", "help"))
 async def cmd_start(msg: types.Message):
+    logger.info(f"Received /start from {msg.from_user.id}")
     if msg.from_user.id not in user_states:
         user_states[msg.from_user.id] = {"waiting_for_image_prompt": False}
     
@@ -123,16 +124,19 @@ async def cmd_start(msg: types.Message):
 
 @dp.message(F.text == "🎤 Говори")
 async def handle_voice_request(msg: types.Message):
+    logger.info(f"Voice request from {msg.from_user.id}")
     user_states[msg.from_user.id] = {"waiting_for_image_prompt": False}
     await msg.reply("Отправь мне голосовое сообщение 🎙️")
 
 @dp.message(F.text == "🖼 Генерировать картинку")
 async def handle_image_request(msg: types.Message):
+    logger.info(f"Image request from {msg.from_user.id}")
     user_states[msg.from_user.id] = {"waiting_for_image_prompt": True}
     await msg.reply("Опиши изображение, которое нужно создать:")
 
 @dp.message(F.voice)
 async def handle_voice(msg: types.Message):
+    logger.info(f"Voice message from {msg.from_user.id}")
     user_id = msg.from_user.id
     try:
         file = await bot.get_file(msg.voice.file_id)
@@ -140,7 +144,9 @@ async def handle_voice(msg: types.Message):
         await bot.download_file(file.file_path, destination=ogg_path)
         await AudioProcessor.convert_ogg_to_mp3(ogg_path, mp3_path)
         text = await speech_to_text(mp3_path)
+        logger.info(f"Recognized text: {text}")
         reply = await openrouter_chat(text)
+        logger.info(f"AI reply: {reply}")
         audio_bytes = await text_to_speech(reply)
         if audio_bytes:
             await msg.answer_voice(
@@ -156,10 +162,12 @@ async def handle_voice(msg: types.Message):
 
 @dp.message(F.text)
 async def handle_text(msg: types.Message):
+    logger.info(f"Text message from {msg.from_user.id}: {msg.text}")
     user_id = msg.from_user.id
     state = user_states.get(user_id, {})
     try:
         if state.get("waiting_for_image_prompt"):
+            logger.info(f"Processing image prompt: {msg.text}")
             url = await generate_image(msg.text)
             if url:
                 await msg.reply_photo(photo=url)
@@ -168,6 +176,7 @@ async def handle_text(msg: types.Message):
             state["waiting_for_image_prompt"] = False
         else:
             reply = await openrouter_chat(msg.text)
+            logger.info(f"AI reply: {reply}")
             await msg.reply(reply)
     except Exception as e:
         logger.error(f"Ошибка в обработке текста: {e}")
@@ -187,6 +196,17 @@ async def health_check(request):
 
 if __name__ == '__main__':
     async def main():
+        # Для тестирования можно сначала использовать polling
+        try:
+            # Проверка работы бота через polling
+            logger.info("Пробуем запустить бота через polling для тестирования...")
+            await bot.delete_webhook(drop_pending_updates=True)
+            await dp.start_polling(bot)
+            return
+        except Exception as e:
+            logger.error(f"Polling не сработал: {e}")
+            logger.info("Пробуем запустить через вебхук...")
+
         app = web.Application()
         app.router.add_get('/', health_check)
         app.on_startup.append(on_startup)
@@ -204,4 +224,9 @@ if __name__ == '__main__':
         while True:
             await asyncio.sleep(3600)
 
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("Бот остановлен")
+    except Exception as e:
+        logger.error(f"Ошибка при запуске бота: {e}")
