@@ -74,11 +74,11 @@ class AudioProcessor:
             res = await r.json()
             return res['choices'][0]['message']['content']
     async with aiohttp.ClientSession() as session:
-        async with session.post(url, ...) as r:
-    if r.status != 200:
-        logger.error(f"ElevenLabs error: {await r.text()}")
-        return None
-    return await r.read()
+    async with session.post(url, ...) as r:
+        if r.status != 200:
+            logger.error(f"ElevenLabs error: {await r.text()}")
+            return None
+        return await r.read()
 
 async def generate_image(prompt: str) -> Optional[str]:
     headers = {
