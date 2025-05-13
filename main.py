@@ -31,7 +31,7 @@ OPENROUTER_API_KEY = env['OPENROUTER_API_KEY']
 ELEVEN_API_KEY = env['ELEVEN_API_KEY']
 WEBHOOK_HOST = env['WEBHOOK_HOST']
 ELEVEN_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"
-WEBHOOK_PATH = f"/webhook/{BOT_TOKEN}"
+WEBHOOK_PATH = "/webhook"  # Простой путь
 WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
 WEBAPP_PORT = int(os.getenv("PORT", "10000"))
 
@@ -63,9 +63,11 @@ async def openrouter_chat(prompt: str) -> str:
         "temperature": 0.7
     }
     async with aiohttp.ClientSession() as session:
-        async with session.post("https://openrouter.ai/api/v1/chat/completions", json=payload, headers=headers) as r:
-            res = await r.json()
-            return res['choices'][0]['message']['content']
+        async with session.post(url, ...) as r:
+    if r.status != 200:
+        logger.error(f"ElevenLabs error: {await r.text()}")
+        return None
+    return await r.read()
 
 async def generate_image(prompt: str) -> Optional[str]:
     headers = {
@@ -95,7 +97,7 @@ async def text_to_speech(text: str) -> Optional[bytes]:
 async def speech_to_text(file_path: str) -> Optional[str]:
     openai.api_key = OPENROUTER_API_KEY
     with open(file_path, "rb") as f:
-        transcript = openai.Audio.transcribe("whisper-1", f)
+       transcript = await openai.Audio.atranscribe("whisper-1", f)  # Асинхронный вызов
         return transcript.get("text")
 
 # Команды
@@ -108,10 +110,64 @@ async def cmd_start(msg: types.Message):
     user_states[msg.from_user.id] = {"waiting_for_image_prompt": False}
     await msg.answer("Привет! Я бот 🤖. Что хочешь сделать?", reply_markup=kb)
 
-@dp.message(F.text == "🎤 Говори")
-async def handle_voice_request(msg: types.Message):
-    user_states[msg.from_user.id] = {"waiting_for_image_prompt": False}
-    await msg.reply("Отправь мне голосовое сообщение 🎙️")
+@dp.message(F.voice)
+async def handle_voice(msg: types.Message):
+    """Обработка голосовых сообщений с улучшенной обработкой ошибок"""
+    user_id = msg.from_user.id
+    
+    # Инициализация состояния
+    if user_id not in user_states:
+        user_states[user_id] = {"waiting_for_image_prompt": False}
+
+    # Временные файлы
+    ogg_path = f"temp_{user_id}.ogg"
+    mp3_path = f"temp_{user_id}.mp3"
+    
+    try:
+        # 1. Скачивание голосового
+        voice = msg.voice
+        file = await bot.get_file(voice.file_id)
+        await bot.download_file(file.file_path, destination=ogg_path)
+        
+        # 2. Конвертация в MP3
+        await AudioProcessor.convert_ogg_to_mp3(ogg_path, mp3_path)
+        
+        # 3. Распознавание текста
+        text = await speech_to_text(mp3_path)
+        if not text:
+            await msg.reply("🔇 Не удалось распознать речь")
+            return
+            
+        # 4. Генерация ответа
+        reply = await openrouter_chat(text)
+        if not reply:
+            await msg.reply("🤖 Ошибка генерации ответа")
+            return
+            
+        # 5. Синтез речи
+        audio_bytes = await text_to_speech(reply)
+        if audio_bytes:
+            await msg.answer_voice(
+                voice=types.BufferedInputFile(
+                    audio_bytes,
+                    filename="response.ogg"
+                ),
+                caption="Ответ голосом"
+            )
+        else:
+            await msg.reply(f"💬 Текстовый ответ:\n\n{reply}")
+            
+    except aiohttp.ClientError as e:
+        logger.error(f"API error: {str(e)}")
+        await msg.reply("🌐 Ошибка подключения к внешнему сервису")
+        
+    except Exception as e:
+        logger.error(f"Unexpected error: {str(e)}", exc_info=True)
+        await msg.reply("⚠️ Непредвиденная ошибка")
+        
+    finally:
+        # Очистка временных файлов
+        await AudioProcessor.cleanup(ogg_path, mp3_path)
 
 @dp.message(F.text == "🖼 Генерировать картинку")
 async def handle_image_request(msg: types.Message):
@@ -131,7 +187,12 @@ async def handle_voice(msg: types.Message):
         reply = await openrouter_chat(text)
         audio_bytes = await text_to_speech(reply)
         if audio_bytes:
-            await msg.answer_voice(voice=audio_bytes)
+            await msg.answer_voice(
+    voice=types.BufferedInputFile(
+        audio_bytes, 
+        filename="response.ogg"  # или .mp3
+    )
+)
         else:
             await msg.reply(reply)
     except Exception as e:
@@ -163,6 +224,10 @@ async def handle_text(msg: types.Message):
 async def on_startup(app): await bot.set_webhook(url=WEBHOOK_URL, drop_pending_updates=True); logger.info(f"Бот запущен. Вебхук: {WEBHOOK_URL}")
 async def on_shutdown(app): await bot.delete_webhook(); logger.info("Бот остановлен")
 
+async def health_check(request):
+    """Проверка работоспособности бота"""
+    return web.Response(text="Bot is running")
+
 if __name__ == '__main__':
     import asyncio
     from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
@@ -170,6 +235,7 @@ if __name__ == '__main__':
 
     async def main():
         app = web.Application()
+        app.router.add_get('/', health_check)
         app.on_startup.append(on_startup)
         app.on_shutdown.append(on_shutdown)
 
