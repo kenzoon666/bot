@@ -1,3 +1,9 @@
+# Добавьте этот код сразу после импортов
+print("Проверка переменных окружения:")
+print(f"BOT_TOKEN: {'установлен' if BOT_TOKEN else 'НЕ УСТАНОВЛЕН'}")
+print(f"OPENROUTER_API_KEY: {'установлен' if OPENROUTER_API_KEY else 'НЕ УСТАНОВЛЕН'}")
+print(f"ELEVEN_API_KEY: {'установлен' if ELEVEN_API_KEY else 'НЕ УСТАНОВЛЕН'}")
+print(f"WEBHOOK_HOST: {'установлен' if WEBHOOK_HOST else 'НЕ УСТАНОВЛЕН'}")
 import logging
 import os
 import aiohttp
@@ -9,31 +15,46 @@ from pydub import AudioSegment
 from typing import Optional, Dict, Any
 import openai
 
-# Конфигурация
-BOT_TOKEN = os.getenv("BOT_TOKEN", "")
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
-ELEVEN_API_KEY = os.getenv("ELEVEN_API_KEY", "")
+# Улучшенная проверка переменных окружения
+def check_env_vars():
+    required_vars = {
+        'BOT_TOKEN': os.getenv("BOT_TOKEN"),
+        'OPENROUTER_API_KEY': os.getenv("OPENROUTER_API_KEY"),
+        'ELEVEN_API_KEY': os.getenv("ELEVEN_API_KEY"),
+        'WEBHOOK_HOST': os.getenv("WEBHOOK_HOST")
+    }
+    
+    missing_vars = [name for name, value in required_vars.items() if not value]
+    
+    if missing_vars:
+        error_msg = f"Отсутствуют обязательные переменные окружения: {', '.join(missing_vars)}\n"
+        error_msg += "Пожалуйста, установите их в настройках вашего приложения на Render"
+        raise ValueError(error_msg)
+    
+    return required_vars
+
+try:
+    env_vars = check_env_vars()
+    BOT_TOKEN = env_vars['BOT_TOKEN']
+    OPENROUTER_API_KEY = env_vars['OPENROUTER_API_KEY']
+    ELEVEN_API_KEY = env_vars['ELEVEN_API_KEY']
+    WEBHOOK_HOST = env_vars['WEBHOOK_HOST']
+except ValueError as e:
+    logging.error(str(e))
+    exit(1)
+
+# Остальная конфигурация
 ELEVEN_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"
-WEBHOOK_HOST = os.getenv("WEBHOOK_HOST", "")
-WEBHOOK_PATH = f"/webhook/{BOT_TOKEN}" if BOT_TOKEN else "/webhook"
-WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}" if WEBHOOK_HOST else None
+WEBHOOK_PATH = f"/webhook/{BOT_TOKEN}"
+WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
 WEBAPP_PORT = int(os.getenv("PORT", "8000"))
 
-# Проверка конфигурации
-if not all([BOT_TOKEN, OPENROUTER_API_KEY, ELEVEN_API_KEY, WEBHOOK_HOST]):
-    raise ValueError("Не все обязательные переменные окружения заданы!")
-
-# Логирование
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
-
-# Инициализация бота (упрощенная версия)
+# Инициализация бота и диспетчера
 bot = Bot(token=BOT_TOKEN, parse_mode=ParseMode.HTML)
 dp = Dispatcher(storage=MemoryStorage())
 user_states: Dict[int, Dict[str, Any]] = {}
+
+# ... (остальной код остается без изменений)
 
 # Класс для обработки аудио
 class AudioProcessor:
