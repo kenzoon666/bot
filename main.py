@@ -164,15 +164,26 @@ async def on_startup(app): await bot.set_webhook(url=WEBHOOK_URL, drop_pending_u
 async def on_shutdown(app): await bot.delete_webhook(); logger.info("Бот остановлен")
 
 if __name__ == '__main__':
+    import asyncio
     from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
     from aiohttp import web
 
-    app = web.Application()
-    app.on_startup.append(on_startup)
-    app.on_shutdown.append(on_shutdown)
+    async def main():
+        app = web.Application()
+        app.on_startup.append(on_startup)
+        app.on_shutdown.append(on_shutdown)
 
-    SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path=WEBHOOK_PATH)
-    setup_application(app, dp, bot=bot)
+        SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path=WEBHOOK_PATH)
+        setup_application(app, dp, bot=bot)
 
-    logging.info(f"Запуск на порту: {WEBAPP_PORT}")
-    web.run_app(app, host="0.0.0.0", port=WEBAPP_PORT)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, host="0.0.0.0", port=WEBAPP_PORT)
+        await site.start()
+
+        logging.info(f"Бот запущен. Вебхук: {WEBHOOK_URL}")
+
+        while True:
+            await asyncio.sleep(3600)
+
+    asyncio.run(main())
