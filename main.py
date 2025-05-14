@@ -79,7 +79,7 @@ REPLICATE_API_TOKEN = os.getenv("REPLICATE_API_TOKEN")
 REPLICATE_MODEL = "stability-ai/sdxl"  # или другая доступная тебе
 REPLICATE_VERSION = "a9b8a43bce0e401abbfa17b860e5ac3b21f3a3dbaedf32c89e2e43b6c35a111b"  # нужно актуальное значение!
 
-async def generate_image(prompt: str) -> Optional[str]:
+async def replicate_image(prompt: str) -> Optional[str]:
     url = f"https://api.replicate.com/v1/predictions"
     headers = {
         "Authorization": f"Token {REPLICATE_API_TOKEN}",
