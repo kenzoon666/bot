@@ -63,7 +63,7 @@ async def openrouter_chat(prompt: str) -> Optional[str]:
         "Content-Type": "application/json"
     }
     payload = {
-        "model": "openrouter/cinematika-7b",
+        "model": "mistralai/mixtral-8x7b",  # исправлено: рабочая модель
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.7
     }
@@ -84,7 +84,7 @@ async def generate_image(prompt: str) -> Optional[str]:
         "Content-Type": "application/json"
     }
     payload = {
-        "version": "a9758cbf54c25c5dfc0a7ce37230c3f4e53d2f24eec307341cfc50ca38e5c11c",  # SDXL
+        "version": "db21e45e03c0e2e861a9c2e19d5b9832f3ccab9a2e4d1398ac24df6a13f0b019",  # исправлено: актуальная версия
         "input": {
             "prompt": prompt
         }
@@ -98,7 +98,6 @@ async def generate_image(prompt: str) -> Optional[str]:
             data = await resp.json()
             get_url = data["urls"]["get"]
 
-        # ждём результат
         for _ in range(20):
             await asyncio.sleep(1)
             async with session.get(get_url, headers=headers) as r:
@@ -168,18 +167,21 @@ async def handle_voice(msg: types.Message):
         logger.info(f"Recognized text: {text}")
         reply = await openrouter_chat(text)
         logger.info(f"AI reply: {reply}")
-        audio_bytes = await text_to_speech(reply)
+        audio_bytes = await text_to_speech(reply) if reply else None
         if audio_bytes:
             await msg.answer_voice(
                 voice=types.BufferedInputFile(audio_bytes, filename="response.ogg")
             )
-        else:
+        elif reply:
             await msg.reply(reply)
+        else:
+            await msg.reply("Ошибка при получении ответа от ИИ.")
     except Exception as e:
         logger.error(f"Ошибка в обработке voice: {e}")
         await msg.reply("Ошибка при обработке голосового сообщения.")
     finally:
         await AudioProcessor.cleanup(ogg_path, mp3_path)
+
 
 @dp.message(F.text)
 async def handle_text(msg: types.Message):
@@ -197,11 +199,15 @@ async def handle_text(msg: types.Message):
             state["waiting_for_image_prompt"] = False
         else:
             reply = await openrouter_chat(msg.text)
-            logger.info(f"AI reply: {reply}")
-            await msg.reply(reply)
+            if reply:
+                logger.info(f"AI reply: {reply}")
+                await msg.reply(reply)
+            else:
+                await msg.reply("Ошибка при получении ответа от ИИ.")
     except Exception as e:
         logger.error(f"Ошибка в обработке текста: {e}")
         await msg.reply("Произошла ошибка при обработке текста.")
+
 
 # ==== Вебхук ====
 async def on_startup(app): 
