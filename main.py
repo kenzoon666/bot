@@ -84,7 +84,7 @@ async def generate_image(prompt: str) -> Optional[str]:
         "Content-Type": "application/json"
     }
     payload = {
-        "version": "a9758cb3c2b2e0b9f221150df09c3f18a3b524b7bb41eb0c927c0f1ce4c9c3d0"
+        "version": "a9758cb3c2b2e0b9f221150df09c3f18a3b524b7bb41eb0c927c0f1ce4c9c3d0",  # Stable Diffusion 1.5
         "input": {
             "prompt": prompt
         }
