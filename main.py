@@ -2,6 +2,15 @@ import logging
 import os
 import aiohttp
 import openai
+
+client = openai.OpenAI(api_key=OPENAI_API_KEY)
+
+with open("voice.ogg", "rb") as audio_file:
+    transcript = client.audio.transcriptions.create(
+        model="whisper-1",
+        file=audio_file
+    )
+
 import asyncio
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.enums import ParseMode
@@ -76,38 +85,39 @@ async def openrouter_chat(prompt: str) -> Optional[str]:
             return res['choices'][0]['message']['content']
 
 REPLICATE_API_TOKEN = os.getenv("REPLICATE_API_TOKEN")
+REPLICATE_MODEL = "stability-ai/sdxl"  # или другая доступная тебе
+REPLICATE_VERSION = "a9b8a43bce0e401abbfa17b860e5ac3b21f3a3dbaedf32c89e2e43b6c35a111b"  # нужно актуальное значение!
 
-async def generate_image(prompt: str) -> Optional[str]:
-    url = "https://api.replicate.com/v1/predictions"
+async def replicate_image(prompt: str) -> Optional[str]:
+    url = f"https://api.replicate.com/v1/predictions"
     headers = {
         "Authorization": f"Token {REPLICATE_API_TOKEN}",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
     }
-    payload = {
-        "version": "a9758cb3c2b2e0b9f221150df09c3f18a3b524b7bb41eb0c927c0f1ce4c9c3d0",  # Stable Diffusion 1.5
-        "input": {
-            "prompt": prompt
-        }
+    data = {
+        "version": REPLICATE_VERSION,
+        "input": {"prompt": prompt}
     }
 
     async with aiohttp.ClientSession() as session:
-        async with session.post(url, json=payload, headers=headers) as resp:
+        async with session.post(url, headers=headers, json=data) as resp:
             if resp.status != 201:
                 logger.error(f"Ошибка Replicate: {await resp.text()}")
                 return None
-            data = await resp.json()
-            get_url = data["urls"]["get"]
-
-        for _ in range(20):
-            await asyncio.sleep(1)
-            async with session.get(get_url, headers=headers) as r:
-                result = await r.json()
-                if result["status"] == "succeeded":
-                    return result["output"][0]
-                elif result["status"] == "failed":
-                    logger.error("Генерация провалилась")
+            response_data = await resp.json()
+            prediction_id = response_data["id"]
+    
+    # Подождём, пока изображение сгенерируется
+    for _ in range(10):
+        await asyncio.sleep(2)
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"{url}/{prediction_id}", headers=headers) as resp:
+                response_data = await resp.json()
+                if response_data["status"] == "succeeded":
+                    return response_data["output"][0]
+                elif response_data["status"] == "failed":
                     return None
-        return None
+    return None
 
 async def text_to_speech(text: str) -> Optional[bytes]:
     url = f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVEN_VOICE_ID}"
