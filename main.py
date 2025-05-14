@@ -63,7 +63,7 @@ async def openrouter_chat(prompt: str) -> Optional[str]:
         "Content-Type": "application/json"
     }
     payload = {
-        "model": "openai/gpt-3.5-turbo"  # точно работает у всех
+        "model": "openai/gpt-3.5-turbo",  # точно работает у всех
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.7
     }
