@@ -221,6 +221,10 @@ if __name__ == '__main__':
         app.router.add_get('/', health_check)
         app.on_startup.append(on_startup)
         app.on_shutdown.append(on_shutdown)
+async def webhook_check(request):
+    return web.Response(text="Webhook is alive")
+
+app.router.add_get(WEBHOOK_PATH, webhook_check)
 
         SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path=WEBHOOK_PATH)
         setup_application(app, dp, bot=bot)
