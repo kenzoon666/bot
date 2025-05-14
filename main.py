@@ -2,15 +2,6 @@ import logging
 import os
 import aiohttp
 import openai
-
-client = openai.OpenAI(api_key=OPENAI_API_KEY)
-
-with open("voice.ogg", "rb") as audio_file:
-    transcript = client.audio.transcriptions.create(
-        model="whisper-1",
-        file=audio_file
-    )
-
 import asyncio
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.enums import ParseMode
