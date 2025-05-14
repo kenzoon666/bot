@@ -219,12 +219,14 @@ if __name__ == '__main__':
     async def main():
         app = web.Application()
         app.router.add_get('/', health_check)
+
+        # ✅ добавляем GET /webhook чтобы Telegram видел, что эндпоинт существует
+        async def webhook_check(request):
+            return web.Response(text="Webhook is alive")
+        app.router.add_get(WEBHOOK_PATH, webhook_check)
+
         app.on_startup.append(on_startup)
         app.on_shutdown.append(on_shutdown)
-async def webhook_check(request):
-    return web.Response(text="Webhook is alive")
-
-app.router.add_get(WEBHOOK_PATH, webhook_check)
 
         SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path=WEBHOOK_PATH)
         setup_application(app, dp, bot=bot)
@@ -240,6 +242,11 @@ app.router.add_get(WEBHOOK_PATH, webhook_check)
 
     try:
         asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("Бот остановлен")
+    except Exception as e:
+        logger.error(f"Ошибка при запуске бота: {e}")
+
     except KeyboardInterrupt:
         logger.info("Бот остановлен")
     except Exception as e:
