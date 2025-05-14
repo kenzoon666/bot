@@ -63,7 +63,7 @@ async def openrouter_chat(prompt: str) -> Optional[str]:
         "Content-Type": "application/json"
     }
     payload = {
-        "model": "mistralai/mixtral-8x7b",  # исправлено: рабочая модель
+        "model": "openai/gpt-3.5-turbo"  # точно работает у всех
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.7
     }
@@ -84,7 +84,7 @@ async def generate_image(prompt: str) -> Optional[str]:
         "Content-Type": "application/json"
     }
     payload = {
-        "version": "db21e45e03c0e2e861a9c2e19d5b9832f3ccab9a2e4d1398ac24df6a13f0b019",  # исправлено: актуальная версия
+        "version": "a9758cb3c2b2e0b9f221150df09c3f18a3b524b7bb41eb0c927c0f1ce4c9c3d0"
         "input": {
             "prompt": prompt
         }
